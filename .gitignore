@@ -1,0 +1,32 @@
+# Build and IDE outputs
+[Bb]in/
+[Ob]j/
+bin/
+obj/
+Build/
+Builds/
+Logs/
+MemoryCaptures/
+UserSettings/
+
+# Unity generated files
+.cons/
+.vs/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.idb
+
+# Unity project folder outputs
+Library/
+Temp/
+Obj/

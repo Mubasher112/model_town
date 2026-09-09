@@ -1,0 +1,49 @@
+%YAML 11.3
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 22
+  productGUID: 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+  Company Name: DefaultCompany
+  Product Name: ModelTown
+  defaultCursor: {fileID: 0}
+  cursorHotspot: {x: 0, y: 0}
+  m_SplashScreenBackgroundColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
+  m_ShowUnitySplashScreen: 1
+  m_ShowUnitySplashLogo: 1
+  m_SplashScreenOverlayOpacity: 1
+  m_SplashScreenAnimation: 1
+  m_SplashScreenLogoStyle: 1
+  m_SplashScreenDrawMode: 0
+  m_DefaultIsFullScreen: 1
+  m_DefaultIsNativeResolution: 1
+  m_UsePlayerLog: 1
+  m_DefaultScreenWidth: 1920
+  m_DefaultScreenHeight: 1080
+  m_SupportedAspectRatios:
+    4:3: 1
+    5:4: 1
+    16:10: 1
+    16:9: 1
+    Others: 1
+  m_AutoLeftLandscape: 1
+  m_AutoRightLandscape: 1
+  m_AutoPortrait: 0
+  m_AutoPortraitUpsideDown: 0
+  m_DefaultOrientation: 3
+  m_IOSAppInBackgroundBehavior: 0
+  bundleVersion: 1.0.0
+  m_VersionCode: 1
+  buildNumber:
+    iPhone: 1
+  m_CompanyBundleIdentifier: com.company.modeltown
+  m_AndroidTargetArchitectures: 1
+  m_AndroidMinSdkVersion: 23
+  m_AndroidTargetSdkVersion: 0
+  m_IOSDeviceFamily:
+    iPhone: 1
+    iPad: 1
+  m_IOSTargetOSVersion: 12.0
+  m_IOSAllowHTTPDownload: 0
+  m_IOSURLSchemes: []
