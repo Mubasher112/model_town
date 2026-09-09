@@ -12,19 +12,38 @@ namespace Game.Save
         public string ObjectTypeId;
         public int X;
         public int Y;
-        public int Width;
-        public int Height;
+        public int BaseWidth = 1;
+        public int BaseHeight = 1;
+        public int RotationDegrees = 0;
+    }
+
+    [Serializable]
+    public class SavedRoadTile
+    {
+        public int X;
+        public int Y;
+
+        public SavedRoadTile() { }
+
+        public SavedRoadTile(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
     }
 
     [Serializable]
     public class SaveData
     {
-        public int Version = 1;
+        public int Version = 2;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
         public List<SavedPlacedObject> PlacedObjects = new List<SavedPlacedObject>();
-        public int UnlockedLandExpansions = 1;
+        public List<SavedRoadTile> RoadTiles = new List<SavedRoadTile>();
+        public List<string> UnlockedZoneIds = new List<string>();
+        public int MapWidth = 30;
+        public int MapHeight = 30;
     }
 
     public interface ISaveStorage
@@ -37,7 +56,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 1;
+        public const int CurrentSaveVersion = 2;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -84,7 +103,6 @@ namespace Game.Save
                     return CreateNewSave();
                 }
 
-                // Handle version migration if needed in the future
                 if (data.Version < CurrentSaveVersion)
                 {
                     MigrateSaveData(data);
@@ -94,7 +112,6 @@ namespace Game.Save
             }
             catch
             {
-                // Fallback / recovery from corrupted save
                 return CreateNewSave();
             }
         }
@@ -112,7 +129,10 @@ namespace Game.Save
                     CurrentXP = 0,
                     Coins = 500,
                     Gems = 20
-                }
+                },
+                UnlockedZoneIds = new List<string> { "zone_start" },
+                MapWidth = 30,
+                MapHeight = 30
             };
             Save(data);
             return data;
@@ -120,6 +140,16 @@ namespace Game.Save
 
         private void MigrateSaveData(SaveData data)
         {
+            if (data.Version < 2)
+            {
+                if (data.UnlockedZoneIds == null || data.UnlockedZoneIds.Count == 0)
+                {
+                    data.UnlockedZoneIds = new List<string> { "zone_start" };
+                }
+                if (data.MapWidth <= 0) data.MapWidth = 30;
+                if (data.MapHeight <= 0) data.MapHeight = 30;
+                if (data.RoadTiles == null) data.RoadTiles = new List<SavedRoadTile>();
+            }
             data.Version = CurrentSaveVersion;
         }
 

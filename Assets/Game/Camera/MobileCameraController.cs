@@ -3,6 +3,7 @@ using UnityEngine;
 namespace Game.Camera
 {
     using Game.Input;
+    using Game.World;
 
     public class MobileCameraController : MonoBehaviour
     {
@@ -14,14 +15,23 @@ namespace Game.Camera
 
         [Header("Pan Settings")]
         [SerializeField] private float panSpeed = 0.01f;
-        [SerializeField] private Vector2 minBounds = new Vector2(0f, 0f);
-        [SerializeField] private Vector2 maxBounds = new Vector2(50f, 50f);
+        [SerializeField] private Vector2 minBounds = new Vector2(-20f, -20f);
+        [SerializeField] private Vector2 maxBounds = new Vector2(20f, 20f);
 
         [Header("Damping")]
         [SerializeField] private float smoothTime = 0.1f;
 
         private Vector3 _targetPosition;
-        private Vector3 _velocity = Vector3.zero;
+
+        public void SetBoundsFromGrid(WorldGrid grid)
+        {
+            if (grid == null) return;
+            Vector3 minWorld = grid.GridToWorld(new Vector2Int(0, 0));
+            Vector3 maxWorld = grid.GridToWorld(new Vector2Int(grid.Width - 1, grid.Height - 1));
+
+            minBounds = new Vector2(Mathf.Min(minWorld.x, maxWorld.x) - 5f, Mathf.Min(minWorld.y, maxWorld.y) - 5f);
+            maxBounds = new Vector2(Mathf.Max(minWorld.x, maxWorld.x) + 5f, Mathf.Max(minWorld.y, maxWorld.y) + 5f);
+        }
 
         private void Start()
         {

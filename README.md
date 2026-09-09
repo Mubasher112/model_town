@@ -28,81 +28,75 @@ Assets/Game/
 ├── Save/         # LocalSaveSystem (Versioned JSON save, corruption recovery)
 ├── Services/     # Abstractions (Auth, CloudSave, IAP, Ads, Push Notifications, Analytics)
 ├── Tests/        # Automated NUnit test suite & Assembly Definition
-├── UI/           # Responsive UI components & SafeAreaHandler for notches/Dynamic Island
-└── World/        # Grid coordinates, tile management, terrain & placement rules
+├── UI/           # Mobile UI components, SafeAreaHandler, TileSelectionHandler, DevDebugToolsHandler
+└── World/        # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager
 ```
 
 ---
 
-## 3. How to Open and Run the Game
+## 3. World & Map System Architecture
+
+### Grid & Terrain System
+- **Grid Coordinates**: Integer grid system (`Vector2Int`) supporting configurable map dimensions (default 30x30, expandable to 50x50, 100x100+).
+- **Tile Types**: Configurable via `TerrainConfigLibrary` (`Grass`, `Soil`, `Water`, `Road`, `Rock`, `Tree`, `Locked`, `Building`, `Obstacle`).
+- **Data-Driven Attributes**: Tiles determine buildable, walkable, and occupied status from configuration rather than hardcoded conditionals.
+
+### Coordinate Conversions
+Bi-directional helper methods on `WorldGrid`:
+- `GridToWorld`: Converts grid coordinates `(x, y)` to 2.5D isometric world coordinates.
+- `WorldToGrid`: Converts 2.5D world positions back to integer grid coordinates.
+- `WorldToScreen` / `ScreenToGrid`: Map screen touch/click inputs directly to grid tiles under camera pan/zoom settings.
+
+### Object Placement & Footprints
+- **ObjectFootprint**: Supports base dimensions (e.g. `2x2`, `3x2`) and rotation angles (`0°`, `90°`, `180°`, `270°`).
+- **PlacementValidator**: Evaluates placement validity returning `PlacementResult` (`Valid`, `InvalidOutOfBounds`, `InvalidOccupied`, `InvalidWater`, `InvalidLocked`, `InvalidNotBuildable`).
+- **ObjectPlacementManager**: Manages instance placement, footprint occupation, object removal, and event triggers.
+
+### Roads & Land Expansion
+- **RoadManager**: Handles placing and removing road tiles, updating underlying grid tile types to `TileType.Road`.
+- **LandExpansionManager**: Defines land expansion zones (e.g. `zone_start`, `zone_north`, `zone_east`). Manages locked/unlocked tile states and developer unlock overrides.
+
+---
+
+## 4. How to Open and Run the Game
 1. Launch **Unity Hub** and select **Add project from disk**.
 2. Select the repository root folder.
 3. Open the main scene located under `Assets/Game/Scenes/Main.unity` (or initialize via `GameManager`).
 4. Press **Play** in Unity Editor.
-   - Use left mouse drag to pan the camera.
-   - Use scroll wheel or pinch to zoom in/out.
-   - Select tiles to interact with the world grid.
+   - Touch/drag or left mouse drag to pan the camera.
+   - Scroll wheel or pinch gesture to zoom in/out.
+   - Tap tiles to inspect coordinates, terrain type, buildable, and locked status.
 
 ---
 
-## 4. Running Automated Tests
-The project contains automated unit tests covering Inventory, Economy, Player XP/Level progression, Save/Load serialization/corruption recovery, and World Grid coordinate/placement logic.
+## 5. Development & Debug Tools
+`DevDebugToolsHandler` provides developer convenience methods during testing:
+- **Reset Map**: Clears placed objects and roads.
+- **Unlock All Land**: Unlocks all land expansion zones instantly.
+- **Place Test Object**: Places a test 2x2 structure at a target tile.
+- **Remove Object**: Removes any placed object at selected tile.
 
-### In Unity Editor:
-1. Open **Window > General > Test Runner**.
-2. Select **EditMode** or **PlayMode** and click **Run All**.
+---
 
-### Via .NET CLI:
+## 6. How to Extend the World System
+- **Adding a New Tile Type**:
+  1. Add an entry to the `TileType` enum in `Assets/Game/World/WorldGrid.cs`.
+  2. Register a new `TerrainTypeConfig` in `TerrainConfigLibrary`.
+- **Adding a New Placeable Object**:
+  1. Define a `BuildingConfig` in `Assets/Game/Data/GameConfig.cs` or as a `ScriptableObject`.
+  2. Instantiate an `ObjectFootprint(width, height)`.
+  3. Call `ObjectPlacementManager.TryPlaceObject(...)`.
+
+---
+
+## 7. Running Automated Tests
+Run unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```
 
 ---
 
-## 5. Android Build Process
-1. Open **File > Build Settings** in Unity.
-2. Switch platform to **Android**.
-3. Go to **Player Settings**:
-   - **Package Name**: `com.company.modeltown`
-   - **Minimum API Level**: Android 6.0 (API level 23)
-   - **Target API Level**: Latest Installed / API 34
-   - **Scripting Backend**: IL2CPP
-   - **Target Architectures**: ARM64 enabled
-   - **Default Orientation**: Landscape Left / Landscape Right
-4. To build an APK for testing:
-   - Click **Build** and choose destination `.apk`.
-5. To build an AAB for Google Play Store release:
-   - Check **Build App Bundle (Google Play)** in Build Settings and click **Build**.
-
----
-
-## 6. iOS Build Process
-1. Open **File > Build Settings** in Unity.
-2. Switch platform to **iOS**.
-3. Go to **Player Settings**:
-   - **Bundle Identifier**: `com.company.modeltown`
-   - **Target Minimum iOS Version**: 12.0
-   - **Target Device**: iPhone + iPad
-   - **Scripting Backend**: IL2CPP
-   - **Architecture**: ARM64
-   - **Default Orientation**: Landscape Left / Landscape Right
-4. Click **Build** to generate the Xcode project directory.
-5. Open the resulting `.xcodeproj` in Xcode on macOS.
-6. Configure your Apple Developer Team, Provisioning Profile, and Signing Certificates in Xcode.
-7. Build and deploy to device or archive for App Store upload.
-
----
-
-## 7. Platform Abstractions & Cloud Services
-
-All platform-dependent functionality is isolated behind interfaces in `Assets/Game/Services/`:
-- `IAuthenticationService`
-- `ICloudSaveService`
-- `IPushNotificationService`
-- `IInAppPurchaseService`
-- `IAdsService`
-- `IAnalyticsService`
-- `IAchievementService`
-- `ISocialService`
-
-Core gameplay logic interacts only with these interfaces via `PlatformServiceFactory`, enabling seamless native integration (e.g., Google Play Games, Apple Game Center, Firebase, Unity IAP) without modifying gameplay scripts.
+## 8. Android & iOS Build Processes
+- **Android**: Configure `com.company.modeltown`, API 23+ minimum, IL2CPP ARM64, Landscape orientation. Build APK or AAB bundle.
+- **iOS**: Configure `com.company.modeltown`, iOS 12.0+ minimum, iPhone + iPad, IL2CPP ARM64, Landscape orientation. Export to Xcode.

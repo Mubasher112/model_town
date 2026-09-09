@@ -17,10 +17,10 @@ namespace UnityEngine
     {
         public GameObject gameObject { get; set; } = new GameObject();
         public Transform transform { get; set; } = new Transform();
-        public virtual void Awake() { }
-        public virtual void Start() { }
-        public virtual void Update() { }
-        public virtual void OnDestroy() { }
+        public void Awake() { }
+        public void Start() { }
+        public void Update() { }
+        public void OnDestroy() { }
 
         public T GetComponent<T>() where T : class, new() => new T();
         public static void DontDestroyOnLoad(GameObject target) { }
@@ -33,6 +33,12 @@ namespace UnityEngine
         public string name { get; set; } = "GameObject";
         public bool activeSelf { get; private set; } = true;
         public void SetActive(bool value) => activeSelf = value;
+
+        public GameObject() { }
+        public GameObject(string name) { this.name = name; }
+
+        public T GetComponent<T>() where T : class, new() => new T();
+        public T AddComponent<T>() where T : class, new() => new T();
     }
 
     public class RectTransform
@@ -45,6 +51,7 @@ namespace UnityEngine
     {
         public Vector3 position { get; set; } = Vector3.zero;
         public Vector3 localScale { get; set; } = Vector3.one;
+        public Transform parent { get; set; }
     }
 
     public struct Vector2
@@ -121,6 +128,36 @@ namespace UnityEngine
         }
     }
 
+    public class Camera : MonoBehaviour
+    {
+        public static Camera main { get; set; } = new Camera();
+    }
+
+    public class SpriteRenderer : MonoBehaviour
+    {
+        public Color color { get; set; } = Color.white;
+        public int sortingOrder { get; set; } = 0;
+    }
+
+    public struct Color
+    {
+        public float r, g, b, a;
+        public Color(float r, float g, float b, float a = 1f)
+        {
+            this.r = r;
+            this.g = g;
+            this.b = b;
+            this.a = a;
+        }
+
+        public static Color white => new Color(1, 1, 1, 1);
+        public static Color black => new Color(0, 0, 0, 1);
+        public static Color gray => new Color(0.5f, 0.5f, 0.5f, 1);
+        public static Color green => new Color(0, 1, 0, 1);
+        public static Color blue => new Color(0, 0, 1, 1);
+        public static Color red => new Color(1, 0, 0, 1);
+    }
+
     public struct Rect
     {
         public float x, y, width, height;
@@ -151,6 +188,9 @@ namespace UnityEngine
         public static int Clamp(int value, int min, int max) => value < min ? min : (value > max ? max : value);
         public static float Lerp(float a, float b, float t) => a + (b - a) * Clamp(t, 0f, 1f);
         public static float Abs(float f) => Math.Abs(f);
+        public static int RoundToInt(float f) => (int)Math.Round(f);
+        public static float Min(float a, float b) => Math.Min(a, b);
+        public static float Max(float a, float b) => Math.Max(a, b);
     }
 
     public static class Screen

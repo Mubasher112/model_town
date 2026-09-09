@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Generic;
 using UnityEngine;
 using Game.Player;
 using Game.Economy;
@@ -7,6 +8,7 @@ using Game.World;
 using Game.Save;
 using Game.Platforms;
 using Game.UI;
+using Game.Camera;
 
 namespace Game.Core
 {
@@ -18,12 +20,18 @@ namespace Game.Core
         public EconomyManager EconomyManager { get; private set; }
         public InventoryManager InventoryManager { get; private set; }
         public WorldGrid WorldGrid { get; private set; }
+        public ObjectPlacementManager PlacementManager { get; private set; }
+        public RoadManager RoadManager { get; private set; }
+        public LandExpansionManager ExpansionManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
         [SerializeField] private MobileUIManager uiManager;
+        [SerializeField] private TileSelectionHandler tileSelectionHandler;
+        [SerializeField] private DevDebugToolsHandler devToolsHandler;
+        [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v2.json");
 
         private void Awake()
         {
@@ -50,6 +58,21 @@ namespace Game.Core
             {
                 uiManager.BindPlayerProfile(PlayerProfile);
             }
+
+            if (tileSelectionHandler != null)
+            {
+                tileSelectionHandler.Initialize(WorldGrid);
+            }
+
+            if (devToolsHandler != null)
+            {
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem);
+            }
+
+            if (cameraController != null)
+            {
+                cameraController.SetBoundsFromGrid(WorldGrid);
+            }
         }
 
         public void SaveGame()
@@ -58,8 +81,32 @@ namespace Game.Core
             {
                 Version = LocalSaveSystem.CurrentSaveVersion,
                 PlayerProfile = PlayerProfile,
-                InventoryItems = InventoryManager.GetAllItems()
+                InventoryItems = InventoryManager.GetAllItems(),
+                MapWidth = WorldGrid.Width,
+                MapHeight = WorldGrid.Height,
+                UnlockedZoneIds = ExpansionManager.GetUnlockedZoneIds()
             };
+
+            var placedObjs = PlacementManager.GetAllPlacedObjects();
+            foreach (var p in placedObjs)
+            {
+                saveData.PlacedObjects.Add(new SavedPlacedObject
+                {
+                    ObjectId = p.InstanceId,
+                    ObjectTypeId = p.ObjectTypeId,
+                    X = p.Origin.x,
+                    Y = p.Origin.y,
+                    BaseWidth = p.Footprint.BaseWidth,
+                    BaseHeight = p.Footprint.BaseHeight,
+                    RotationDegrees = (int)p.Rotation
+                });
+            }
+
+            var roads = RoadManager.GetRoadTiles();
+            foreach (var r in roads)
+            {
+                saveData.RoadTiles.Add(new SavedRoadTile(r.x, r.y));
+            }
 
             SaveSystem.Save(saveData);
         }
@@ -79,26 +126,41 @@ namespace Game.Core
                 }
             }
 
-            WorldGrid = new WorldGrid(50, 50);
+            int width = saveData.MapWidth > 0 ? saveData.MapWidth : 30;
+            int height = saveData.MapHeight > 0 ? saveData.MapHeight : 30;
+            WorldGrid = new WorldGrid(width, height);
+
+            PlacementManager = new ObjectPlacementManager(WorldGrid);
+            RoadManager = new RoadManager(WorldGrid);
+            ExpansionManager = new LandExpansionManager(WorldGrid);
+
+            if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
+            {
+                ExpansionManager.LoadUnlockedZones(saveData.UnlockedZoneIds);
+            }
+
+            if (saveData.RoadTiles != null)
+            {
+                var roadCoords = new List<Vector2Int>();
+                foreach (var r in saveData.RoadTiles)
+                {
+                    roadCoords.Add(new Vector2Int(r.X, r.Y));
+                }
+                RoadManager.LoadRoads(roadCoords);
+            }
 
             if (saveData.PlacedObjects != null)
             {
                 foreach (var obj in saveData.PlacedObjects)
                 {
-                    WorldGrid.PlaceObject(new Vector2Int(obj.X, obj.Y), obj.Width, obj.Height, obj.ObjectId);
+                    var footprint = new ObjectFootprint(obj.BaseWidth, obj.BaseHeight);
+                    var rotation = (RotationAngle)obj.RotationDegrees;
+                    PlacementManager.TryPlaceObject(obj.ObjectId, obj.ObjectTypeId, new Vector2Int(obj.X, obj.Y), footprint, rotation, out _);
                 }
             }
         }
 
-        private void OnApplicationPause(bool pauseStatus)
-        {
-            if (pauseStatus)
-            {
-                SaveGame();
-            }
-        }
-
-        private void OnApplicationQuit()
+        private void OnDestroy()
         {
             SaveGame();
         }
