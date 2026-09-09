@@ -7,6 +7,7 @@ using Game.Inventory;
 using Game.World;
 using Game.Farming;
 using Game.Buildings;
+using Game.Production;
 using Game.Data;
 using Game.Save;
 using Game.Platforms;
@@ -30,6 +31,7 @@ namespace Game.Core
         public StandardGameTimeService TimeService { get; private set; }
         public FarmManager FarmManager { get; private set; }
         public BuildingManager BuildingManager { get; private set; }
+        public ProductionManager ProductionManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
@@ -39,9 +41,10 @@ namespace Game.Core
         [SerializeField] private FarmingUIController farmingUIController;
         [SerializeField] private BuildMenuUIController buildMenuUIController;
         [SerializeField] private BuildingInfoUIController buildingInfoUIController;
+        [SerializeField] private ProductionUIController productionUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v4.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v5.json");
 
         private void Awake()
         {
@@ -91,9 +94,14 @@ namespace Game.Core
                 buildingInfoUIController.Initialize(BuildingManager, EconomyManager, PlayerProfile);
             }
 
+            if (productionUIController != null)
+            {
+                productionUIController.Initialize(ProductionManager, BuildingManager, InventoryManager, PlayerProfile);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager);
             }
 
             if (cameraController != null)
@@ -116,6 +124,7 @@ namespace Game.Core
                     {
                         if (farmingUIController != null) farmingUIController.OnFieldSelected(field);
                         if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+                        if (productionUIController != null) productionUIController.ClosePanel();
                         return;
                     }
                 }
@@ -126,8 +135,22 @@ namespace Game.Core
                     var b = BuildingManager.GetBuilding(tile.OccupyingObjectId);
                     if (b != null)
                     {
+                        var bConfig = BuildingLibrary.GetBuilding(b.BuildingId);
+                        if (bConfig != null && bConfig.Category == BuildingCategory.Production && b.State == BuildingState.Completed)
+                        {
+                            var prodBuilding = ProductionManager.GetProductionBuilding(b.InstanceId);
+                            if (prodBuilding != null && productionUIController != null)
+                            {
+                                productionUIController.OnProductionBuildingSelected(prodBuilding);
+                                if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
+                                if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+                                return;
+                            }
+                        }
+
                         if (buildingInfoUIController != null) buildingInfoUIController.OnBuildingSelected(b);
                         if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
+                        if (productionUIController != null) productionUIController.ClosePanel();
                         return;
                     }
                 }
@@ -135,6 +158,7 @@ namespace Game.Core
 
             if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
             if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+            if (productionUIController != null) productionUIController.ClosePanel();
         }
 
         private void Update()
@@ -153,20 +177,11 @@ namespace Game.Core
             {
                 BuildingManager.UpdateAllBuildingStates();
             }
-        }
 
-        public bool PlaceNewField(Vector2Int origin)
-        {
-            string fieldId = "field_" + System.Guid.NewGuid().ToString().Substring(0, 6);
-            var footprint = new ObjectFootprint(1, 1);
-
-            if (PlacementManager.TryPlaceObject(fieldId, "field", origin, footprint, RotationAngle.Deg0, out _))
+            if (ProductionManager != null)
             {
-                var fieldInstance = new FieldInstance(fieldId, origin, 1, 1);
-                FarmManager.RegisterField(fieldInstance);
-                return true;
+                ProductionManager.UpdateAllProductionBuildings();
             }
-            return false;
         }
 
         public void SaveGame()
@@ -239,6 +254,34 @@ namespace Game.Core
                 });
             }
 
+            var prodBuildings = ProductionManager.GetAllProductionBuildings();
+            foreach (var pb in prodBuildings)
+            {
+                var spb = new SavedProductionBuilding
+                {
+                    BuildingInstanceId = pb.BuildingInstanceId,
+                    BuildingId = pb.BuildingId,
+                    QueueCapacity = pb.QueueCapacity
+                };
+
+                if (pb.JobsQueue != null)
+                {
+                    foreach (var job in pb.JobsQueue)
+                    {
+                        spb.JobsQueue.Add(new SavedProductionJob
+                        {
+                            JobId = job.JobId,
+                            RecipeId = job.RecipeId,
+                            StartUtcTicks = job.StartUtcTicks,
+                            State = (int)job.State,
+                            XpAwarded = job.XpAwarded
+                        });
+                    }
+                }
+
+                saveData.ProductionBuildings.Add(spb);
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -266,6 +309,7 @@ namespace Game.Core
             ExpansionManager = new LandExpansionManager(WorldGrid);
             FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
             BuildingManager = new BuildingManager(PlacementManager, EconomyManager, InventoryManager, PlayerProfile, TimeService);
+            ProductionManager = new ProductionManager(InventoryManager, PlayerProfile, TimeService);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
@@ -337,6 +381,42 @@ namespace Game.Core
                     }
 
                     BuildingManager.RegisterBuilding(bInstance);
+
+                    // If it's a production building, register with ProductionManager
+                    if (bConfig != null && bConfig.Category == BuildingCategory.Production)
+                    {
+                        var prodBuilding = new ProductionBuildingInstance(sb.InstanceId, sb.BuildingId);
+                        ProductionManager.RegisterProductionBuilding(prodBuilding);
+                    }
+                }
+            }
+
+            if (saveData.ProductionBuildings != null)
+            {
+                foreach (var spb in saveData.ProductionBuildings)
+                {
+                    var prodBuilding = ProductionManager.GetProductionBuilding(spb.BuildingInstanceId);
+                    if (prodBuilding == null)
+                    {
+                        prodBuilding = new ProductionBuildingInstance(spb.BuildingInstanceId, spb.BuildingId, spb.QueueCapacity);
+                        ProductionManager.RegisterProductionBuilding(prodBuilding);
+                    }
+
+                    prodBuilding.QueueCapacity = spb.QueueCapacity;
+                    prodBuilding.JobsQueue.Clear();
+
+                    if (spb.JobsQueue != null)
+                    {
+                        foreach (var sj in spb.JobsQueue)
+                        {
+                            prodBuilding.JobsQueue.Add(new ProductionJob(sj.JobId, sj.RecipeId)
+                            {
+                                StartUtcTicks = sj.StartUtcTicks,
+                                State = (ProductionJobState)sj.State,
+                                XpAwarded = sj.XpAwarded
+                            });
+                        }
+                    }
                 }
             }
         }

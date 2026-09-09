@@ -2,6 +2,7 @@ using UnityEngine;
 using Game.World;
 using Game.Farming;
 using Game.Buildings;
+using Game.Production;
 using Game.Inventory;
 using Game.Economy;
 using Game.Save;
@@ -18,6 +19,7 @@ namespace Game.UI
         private InventoryManager _inventoryManager;
         private BuildingManager _buildingManager;
         private EconomyManager _economyManager;
+        private ProductionManager _productionManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -31,7 +33,8 @@ namespace Game.UI
             FarmManager farmManager = null,
             InventoryManager inventoryManager = null,
             BuildingManager buildingManager = null,
-            EconomyManager economyManager = null)
+            EconomyManager economyManager = null,
+            ProductionManager productionManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -42,6 +45,7 @@ namespace Game.UI
             _inventoryManager = inventoryManager;
             _buildingManager = buildingManager;
             _economyManager = economyManager;
+            _productionManager = productionManager;
         }
 
         public void ToggleDevMenu()
@@ -79,6 +83,8 @@ namespace Game.UI
             {
                 _inventoryManager.AddItem("wood", "Wood", ItemType.RawMaterial, 50);
                 _inventoryManager.AddItem("stone", "Stone", ItemType.RawMaterial, 50);
+                _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 50);
+                _inventoryManager.AddItem("crop_sugarcane", "Sugarcane", ItemType.Crop, 50);
             }
         }
 
@@ -114,6 +120,18 @@ namespace Game.UI
                 foreach (var b in buildings)
                 {
                     _buildingManager.DevInstantCompleteConstruction(b.InstanceId);
+                }
+            }
+        }
+
+        public void DevInstantCompleteAllProductionJobs()
+        {
+            if (_productionManager != null)
+            {
+                var prodBuildings = _productionManager.GetAllProductionBuildings();
+                foreach (var pb in prodBuildings)
+                {
+                    _productionManager.DevInstantCompleteCurrentJob(pb.BuildingInstanceId);
                 }
             }
         }

@@ -27,47 +27,59 @@ Assets/Game/
 ├── Inventory/    # Reusable InventoryManager with type and capacity limits
 ├── Platforms/    # PlatformServiceFactory and Platform implementations
 ├── Player/       # PlayerProfile (Level, XP, Coins, Gems)
-├── Save/         # LocalSaveSystem (Versioned JSON save v4, corruption recovery)
+├── Production/   # ProductionManager, ProductionJob, ProductionBuildingInstance, ProductionStates
+├── Save/         # LocalSaveSystem (Versioned JSON save v5, corruption recovery)
 ├── Services/     # Abstractions & GameTimeService (Auth, CloudSave, IAP, Ads, Analytics, UTC time)
 ├── Tests/        # Automated NUnit test suite & Assembly Definition
-├── UI/           # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, DevDebugToolsHandler
+├── UI/           # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, DevDebugToolsHandler
 └── World/        # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer
 ```
 
 ---
 
-## 3. Buildings & Construction System Architecture
+## 3. Production & Factory System Architecture
+
+### Production Gameplay Loop
+`Grow Crops → Harvest → Process Resources → Collect Products → Store Products`
+
+### Production Buildings & Initial Catalog
+- **Feed Mill**: Converts Wheat x2 → Animal Feed x1 (15s, 8 XP)
+- **Bakery**: Converts Wheat x2 → Flour x1 (20s, 10 XP) or Flour x1 + Sugar x1 → Bread x1 (30s, 18 XP)
+- **Sugar Mill**: Converts Sugarcane x2 → Sugar x1 (25s, 15 XP)
+- **Dairy Factory**: Converts Animal Feed x2 → Milk x1 (35s, 20 XP)
+
+### Production States & Queue Machine
+`ProductionJobState` enum (`Queued`, `Producing`, `Ready`, `Blocked`).
+- **Queue Behavior**: When a job starts producing, required ingredients are verified and consumed from inventory. Queued jobs wait sequentially.
+- **Timestamp-Based Offline Production**: Production progress is evaluated on-demand from persistent UTC start timestamps:
+$$\text{Progress} = \frac{\text{CurrentUtcTicks} - \text{StartUtcTicks}}{\text{ProductionTimeSeconds} \times 10,000,000}$$
+When returning to the game, completed jobs advance to `Ready` state and unlock subsequent queued jobs automatically.
+
+### Multi-Step Production Chains
+Outputs from one factory serve as inputs for secondary products (e.g., `Wheat` → `Flour` + `Sugar` → `Bread`).
+
+---
+
+## 4. Buildings & Construction System Architecture
 
 ### Construction Gameplay Loop
 `Select Building → Preview Footprint → Place → Pay/Reserve Cost → Construct → Wait / Offline → Complete → Unlock Functionality + Award XP`
 
-### Building Categories & Initial Catalog
+### Building Categories & Catalog
 - **Residential**: Small House (2x2, Pop: +5), Family House (3x2, Pop: +12)
 - **Storage**: Barn (3x3, Storage Bonus: +20)
 - **Community**: Town Hall (3x3, Progression center)
+- **Production**: Feed Mill, Bakery, Sugar Mill, Dairy Factory
 - **Decoration**: Pine Tree (1x1), Flower Bed (1x1), Small Fountain (2x2)
-
-### Building States & Offline Construction
-`BuildingState` enum (`Preview`, `UnderConstruction`, `Completed`, `Upgrading`, `Locked`).
-Construction progress is evaluated on-demand from persistent UTC timestamps (`ConstructionStartUtcTicks` / `UpgradeStartUtcTicks`):
-$$\text{Progress} = \frac{\text{CurrentUtcTicks} - \text{ConstructionStartUtcTicks}}{\text{ConstructionTimeSeconds} \times 10,000,000}$$
-Completion is idempotent and awards configured XP rewards once upon completion.
-
-### Upgrades & Town Capacities
-- **Upgrades**: Increase building level, boost town population capacity, and expand barn inventory storage capacity.
-- **Population & Storage**: Recalculated dynamically by `BuildingManager.RecalculateTownCapacities()`.
 
 ---
 
-## 4. Farming and Crop System Architecture
+## 5. Farming and Crop System Architecture
 
 ### Gameplay Loop
 `Prepare Field → Plant Seed → Wait / Offline Growth → Grow → Harvest → Receive Items + XP`
 
-### Field States
-`Empty` → `Planted` → `Growing` → `Ready` → `Harvested` → `Empty`.
-
-### Crop Data & Definitions
+### Crop Catalog
 - **Wheat**: Growth 10s | Seed: `seed_wheat` | Harvest: `crop_wheat` (x2) | XP: 5 | Level 1
 - **Corn**: Growth 30s | Seed: `seed_corn` | Harvest: `crop_corn` (x2) | XP: 12 | Level 2
 - **Carrot**: Growth 60s | Seed: `seed_carrot` | Harvest: `crop_carrot` (x2) | XP: 20 | Level 3
@@ -76,10 +88,11 @@ Completion is idempotent and awards configured XP rewards once upon completion.
 
 ---
 
-## 5. Development & Debug Tools
+## 6. Development & Debug Tools
 `DevDebugToolsHandler` provides developer convenience methods during testing:
+- **Instant Complete All Production Jobs**: Instantly advances active production jobs to `Ready`.
+- **Give Materials & Ingredients**: Grants 50 wood, stone, wheat, and sugarcane.
 - **Give Coins & Gems**: Grants 5,000 coins and 100 gems.
-- **Give Materials**: Grants 50 wood and 50 stone raw materials.
 - **Give Seeds**: Adds 20 seeds for all crop types to inventory.
 - **Instant Complete All Constructions**: Instantly completes active constructions and upgrades.
 - **Instant Grow All Fields**: Instantly advances all planted crops to `Ready` state.
@@ -87,23 +100,33 @@ Completion is idempotent and awards configured XP rewards once upon completion.
 
 ---
 
-## 6. How to Extend the Game
-- **Adding a New Building**:
-  1. Register a new `BuildingConfig` in `BuildingLibrary` (`Assets/Game/Data/GameConfig.cs`).
-  2. Assign footprint dimensions, construction costs, materials, and population/storage bonuses.
-- **Adding a New Crop**:
-  1. Register a new `CropConfig` in `CropLibrary` (`Assets/Game/Data/GameConfig.cs`).
+## 7. How to Extend Production Recipes
+1. Define a new `RecipeConfig` in `RecipeLibrary` (`Assets/Game/Data/GameConfig.cs`):
+```csharp
+new RecipeConfig(
+    "recipe_cheese",
+    "Cheese",
+    "dairy_factory",
+    "item_cheese",
+    outputQuantity: 1,
+    productionTimeSeconds: 40f,
+    xpReward: 25,
+    unlockLevel: 5,
+    new List<RecipeIngredient> { new RecipeIngredient("item_milk", 2) }
+)
+```
+2. Call `ProductionManager.StartProductionJob(buildingInstanceId, "recipe_cheese")`.
 
 ---
 
-## 7. Running Automated Tests
-Run all 24 automated unit tests directly via .NET CLI:
+## 8. Running Automated Tests
+Run all 30 automated unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```
 
 ---
 
-## 8. Android & iOS Build Processes
+## 9. Android & iOS Build Processes
 - **Android**: Configure `com.company.modeltown`, API 23+ minimum, IL2CPP ARM64, Landscape orientation. Build APK or AAB bundle.
 - **iOS**: Configure `com.company.modeltown`, iOS 12.0+ minimum, iPhone + iPad, IL2CPP ARM64, Landscape orientation. Export to Xcode.

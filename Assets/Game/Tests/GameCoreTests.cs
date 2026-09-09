@@ -7,6 +7,7 @@ using Game.Inventory;
 using Game.World;
 using Game.Farming;
 using Game.Buildings;
+using Game.Production;
 using Game.Data;
 using Game.Services;
 using Game.Save;
@@ -331,7 +332,7 @@ namespace Game.Tests
             Assert.AreEqual(BuildingOperationResult.Success, result);
             Assert.IsNotNull(instance);
             Assert.AreEqual(BuildingState.UnderConstruction, instance.State);
-            Assert.AreEqual(initialCoins - 100, _profile.Coins); // 100 coin cost deducted
+            Assert.AreEqual(initialCoins - 100, _profile.Coins);
         }
 
         [Test]
@@ -343,7 +344,7 @@ namespace Game.Tests
             var timeService = new StandardGameTimeService();
             var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
 
-            _profile.Coins = 10; // Insufficient coins for small house (cost 100)
+            _profile.Coins = 10;
             var result = buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
 
             Assert.AreEqual(BuildingOperationResult.CannotAffordCoins, result);
@@ -354,7 +355,7 @@ namespace Game.Tests
         public void BuildingInstance_OfflineConstructionAndIdempotentCompletion()
         {
             long startTicks = System.DateTime.UtcNow.Ticks;
-            var houseConfig = BuildingLibrary.GetBuilding("small_house"); // 15s construction
+            var houseConfig = BuildingLibrary.GetBuilding("small_house");
 
             var instance = new BuildingInstance("bldg_1", "small_house", new Vector2Int(10, 10))
             {
@@ -362,11 +363,9 @@ namespace Game.Tests
                 ConstructionStartUtcTicks = startTicks
             };
 
-            // 5s elapsed
             long midTicks = startTicks + System.TimeSpan.FromSeconds(5).Ticks;
             Assert.AreEqual(0.33f, instance.GetConstructionProgress(midTicks, houseConfig), 0.05f);
 
-            // 16s elapsed -> Complete
             long endTicks = startTicks + System.TimeSpan.FromSeconds(16).Ticks;
             Assert.IsTrue(instance.CheckAndUpdateState(endTicks, houseConfig));
             Assert.AreEqual(BuildingState.Completed, instance.State);
@@ -387,7 +386,6 @@ namespace Game.Tests
             buildingManager.StartConstruction("barn", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
             buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
 
-            // Barn provides +20 storage capacity bonus
             Assert.AreEqual(120, _inventoryManager.MaxCapacity);
         }
 
@@ -405,13 +403,142 @@ namespace Game.Tests
 
             Assert.AreEqual(5, buildingManager.TotalPopulationCapacity);
 
-            // Upgrade Small House
             var result = buildingManager.StartUpgrade(instance.InstanceId);
             Assert.AreEqual(BuildingOperationResult.Success, result);
             buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
 
             Assert.AreEqual(2, instance.Level);
-            Assert.AreEqual(10, buildingManager.TotalPopulationCapacity); // Base 5 + 5 upgrade bonus
+            Assert.AreEqual(10, buildingManager.TotalPopulationCapacity);
+        }
+        #endregion
+
+        #region Production & Factory System Tests
+        [Test]
+        public void RecipeLibrary_LoadsConfigurationsCorrectly()
+        {
+            var feedRecipe = RecipeLibrary.GetRecipe("recipe_animal_feed");
+            Assert.IsNotNull(feedRecipe);
+            Assert.AreEqual("Animal Feed", feedRecipe.Name);
+            Assert.AreEqual("feed_mill", feedRecipe.BuildingId);
+            Assert.AreEqual("item_animal_feed", feedRecipe.OutputItemId);
+            Assert.AreEqual(1, feedRecipe.Ingredients.Count);
+            Assert.AreEqual("crop_wheat", feedRecipe.Ingredients[0].ItemId);
+            Assert.AreEqual(2, feedRecipe.Ingredients[0].Quantity);
+
+            var bakeryRecipes = RecipeLibrary.GetRecipesForBuilding("bakery");
+            Assert.AreEqual(2, bakeryRecipes.Count);
+        }
+
+        [Test]
+        public void ProductionManager_StartProductionJob_DeductsIngredientsOnStart()
+        {
+            var timeService = new StandardGameTimeService();
+            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
+
+            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 2);
+            prodManager.RegisterProductionBuilding(feedMill);
+
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 5);
+
+            var result = prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
+            Assert.AreEqual(ProductionOperationResult.Success, result);
+            Assert.AreEqual(1, feedMill.JobsQueue.Count);
+            Assert.AreEqual(ProductionJobState.Producing, feedMill.JobsQueue[0].State);
+            Assert.AreEqual(3, _inventoryManager.GetQuantity("crop_wheat")); // 2 wheat consumed
+        }
+
+        [Test]
+        public void ProductionManager_StartProductionJob_RejectsMissingIngredientsAndFullQueue()
+        {
+            var timeService = new StandardGameTimeService();
+            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
+
+            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 1); // Queue cap 1
+            prodManager.RegisterProductionBuilding(feedMill);
+
+            // Reject missing ingredients
+            var noIngResult = prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
+            Assert.AreEqual(ProductionOperationResult.MissingIngredients, noIngResult);
+
+            // Add ingredients for 2 jobs
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
+
+            Assert.AreEqual(ProductionOperationResult.Success, prodManager.StartProductionJob("pm_1", "recipe_animal_feed"));
+            Assert.AreEqual(ProductionOperationResult.QueueFull, prodManager.StartProductionJob("pm_1", "recipe_animal_feed"));
+        }
+
+        [Test]
+        public void ProductionJob_OfflineProgressAndCollection()
+        {
+            var timeService = new StandardGameTimeService();
+            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
+
+            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 2);
+            prodManager.RegisterProductionBuilding(feedMill);
+
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
+            prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
+
+            // Complete current job via dev tool
+            prodManager.DevInstantCompleteCurrentJob("pm_1");
+            Assert.AreEqual(ProductionJobState.Ready, feedMill.JobsQueue[0].State);
+
+            int xpBefore = _profile.CurrentXP;
+            var collectResult = prodManager.CollectProduct("pm_1");
+
+            Assert.AreEqual(ProductionOperationResult.Success, collectResult);
+            Assert.AreEqual(0, feedMill.JobsQueue.Count);
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_animal_feed"));
+            Assert.Greater(_profile.CurrentXP, xpBefore);
+        }
+
+        [Test]
+        public void ProductionManager_ProductionChain_WheatToFlourToBread()
+        {
+            var timeService = new StandardGameTimeService();
+            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
+            _profile.Level = 5; // Unlock all recipes
+
+            var bakery = new ProductionBuildingInstance("bakery_1", "bakery", 2);
+            prodManager.RegisterProductionBuilding(bakery);
+
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 4);
+            _inventoryManager.AddItem("item_sugar", "Sugar", ItemType.ManufacturedGood, 2);
+
+            // Step 1: Flour (Wheat x2 -> Flour x1)
+            prodManager.StartProductionJob("bakery_1", "recipe_flour");
+            prodManager.DevInstantCompleteCurrentJob("bakery_1");
+            prodManager.CollectProduct("bakery_1");
+
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_flour"));
+
+            // Step 2: Bread (Flour x1 + Sugar x1 -> Bread x1)
+            prodManager.StartProductionJob("bakery_1", "recipe_bread");
+            prodManager.DevInstantCompleteCurrentJob("bakery_1");
+            prodManager.CollectProduct("bakery_1");
+
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_bread"));
+        }
+
+        [Test]
+        public void ProductionManager_CollectProduct_FullStorageRejection()
+        {
+            var tinyInventory = new InventoryManager(1);
+            var timeService = new StandardGameTimeService();
+            var prodManager = new ProductionManager(tinyInventory, _profile, timeService);
+
+            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 2);
+            prodManager.RegisterProductionBuilding(feedMill);
+
+            tinyInventory.AddItem("crop_wheat", "Wheat", ItemType.Crop, 1);
+            // Storage now full (1/1)
+
+            var headJob = new ProductionJob("j1", "recipe_animal_feed") { State = ProductionJobState.Ready };
+            feedMill.JobsQueue.Add(headJob);
+
+            var result = prodManager.CollectProduct("pm_1");
+            Assert.AreEqual(ProductionOperationResult.StorageFull, result);
+            Assert.AreEqual(1, feedMill.JobsQueue.Count); // Job retained
         }
         #endregion
 
@@ -419,11 +546,11 @@ namespace Game.Tests
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v4.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v5.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 4,
+                Version = 5,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
                 UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
@@ -438,22 +565,36 @@ namespace Game.Tests
                 Buildings = new List<SavedBuilding>
                 {
                     new SavedBuilding { InstanceId = "b1", BuildingId = "small_house", X = 15, Y = 15, BaseWidth = 2, BaseHeight = 2, RotationDegrees = 0, Level = 1, State = (int)BuildingState.Completed }
+                },
+                ProductionBuildings = new List<SavedProductionBuilding>
+                {
+                    new SavedProductionBuilding
+                    {
+                        BuildingInstanceId = "pb1",
+                        BuildingId = "feed_mill",
+                        QueueCapacity = 2,
+                        JobsQueue = new List<SavedProductionJob>
+                        {
+                            new SavedProductionJob { JobId = "j1", RecipeId = "recipe_animal_feed", State = (int)ProductionJobState.Producing, StartUtcTicks = System.DateTime.UtcNow.Ticks }
+                        }
+                    }
                 }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v4.json"));
+            Assert.IsTrue(storage.Exists("save_v5.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(4, loadedSave.Version);
+            Assert.AreEqual(5, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);
             Assert.AreEqual(1, loadedSave.PlacedObjects.Count);
             Assert.AreEqual(1, loadedSave.Fields.Count);
             Assert.AreEqual(1, loadedSave.Buildings.Count);
-            Assert.AreEqual("b1", loadedSave.Buildings[0].InstanceId);
-            Assert.AreEqual("small_house", loadedSave.Buildings[0].BuildingId);
+            Assert.AreEqual(1, loadedSave.ProductionBuildings.Count);
+            Assert.AreEqual("pb1", loadedSave.ProductionBuildings[0].BuildingInstanceId);
+            Assert.AreEqual("recipe_animal_feed", loadedSave.ProductionBuildings[0].JobsQueue[0].RecipeId);
         }
 
         private class MockStorage : ISaveStorage

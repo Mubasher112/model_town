@@ -102,6 +102,22 @@ namespace Game.Data
                 new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50)
             },
             {
+                "feed_mill",
+                new BuildingConfig("feed_mill", "Feed Mill", "Converts crops into animal feed.", BuildingCategory.Production, 3, 3, 150, 20f, unlockLevel: 1, xpReward: 20)
+            },
+            {
+                "bakery",
+                new BuildingConfig("bakery", "Bakery", "Bakes fresh flour and bread from crops.", BuildingCategory.Production, 3, 3, 200, 30f, unlockLevel: 2, xpReward: 25)
+            },
+            {
+                "sugar_mill",
+                new BuildingConfig("sugar_mill", "Sugar Mill", "Processes sugarcane into sugar.", BuildingCategory.Production, 3, 3, 300, 40f, unlockLevel: 3, xpReward: 30)
+            },
+            {
+                "dairy_factory",
+                new BuildingConfig("dairy_factory", "Dairy Factory", "Produces fresh milk using animal feed.", BuildingCategory.Production, 3, 3, 400, 50f, unlockLevel: 4, xpReward: 40)
+            },
+            {
                 "tree",
                 new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2)
             },
@@ -230,10 +246,134 @@ namespace Game.Data
     public class RecipeConfig
     {
         public string RecipeId;
+        public string Name;
         public string BuildingId;
         public string OutputItemId;
         public int OutputQuantity = 1;
-        public float ProductionTimeSeconds;
+        public float ProductionTimeSeconds = 15f;
+        public int XpReward = 10;
+        public int UnlockLevel = 1;
         public List<RecipeIngredient> Ingredients = new List<RecipeIngredient>();
+
+        public RecipeConfig() { }
+
+        public RecipeConfig(
+            string recipeId,
+            string name,
+            string buildingId,
+            string outputItemId,
+            int outputQuantity,
+            float productionTimeSeconds,
+            int xpReward,
+            int unlockLevel,
+            List<RecipeIngredient> ingredients)
+        {
+            RecipeId = recipeId;
+            Name = name;
+            BuildingId = buildingId;
+            OutputItemId = outputItemId;
+            OutputQuantity = outputQuantity;
+            ProductionTimeSeconds = productionTimeSeconds;
+            XpReward = xpReward;
+            UnlockLevel = unlockLevel;
+            Ingredients = ingredients ?? new List<RecipeIngredient>();
+        }
+    }
+
+    public static class RecipeLibrary
+    {
+        private static readonly Dictionary<string, RecipeConfig> _recipes = new Dictionary<string, RecipeConfig>
+        {
+            {
+                "recipe_animal_feed",
+                new RecipeConfig(
+                    "recipe_animal_feed",
+                    "Animal Feed",
+                    "feed_mill",
+                    "item_animal_feed",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 15f,
+                    xpReward: 8,
+                    unlockLevel: 1,
+                    new List<RecipeIngredient> { new RecipeIngredient("crop_wheat", 2) }
+                )
+            },
+            {
+                "recipe_flour",
+                new RecipeConfig(
+                    "recipe_flour",
+                    "Flour",
+                    "bakery",
+                    "item_flour",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 20f,
+                    xpReward: 10,
+                    unlockLevel: 2,
+                    new List<RecipeIngredient> { new RecipeIngredient("crop_wheat", 2) }
+                )
+            },
+            {
+                "recipe_bread",
+                new RecipeConfig(
+                    "recipe_bread",
+                    "Bread",
+                    "bakery",
+                    "item_bread",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 30f,
+                    xpReward: 18,
+                    unlockLevel: 2,
+                    new List<RecipeIngredient> { new RecipeIngredient("item_flour", 1), new RecipeIngredient("item_sugar", 1) }
+                )
+            },
+            {
+                "recipe_sugar",
+                new RecipeConfig(
+                    "recipe_sugar",
+                    "Sugar",
+                    "sugar_mill",
+                    "item_sugar",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 25f,
+                    xpReward: 15,
+                    unlockLevel: 3,
+                    new List<RecipeIngredient> { new RecipeIngredient("crop_sugarcane", 2) }
+                )
+            },
+            {
+                "recipe_milk",
+                new RecipeConfig(
+                    "recipe_milk",
+                    "Milk",
+                    "dairy_factory",
+                    "item_milk",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 35f,
+                    xpReward: 20,
+                    unlockLevel: 4,
+                    new List<RecipeIngredient> { new RecipeIngredient("item_animal_feed", 2) }
+                )
+            }
+        };
+
+        public static RecipeConfig GetRecipe(string recipeId)
+        {
+            return _recipes.TryGetValue(recipeId, out var config) ? config : null;
+        }
+
+        public static List<RecipeConfig> GetRecipesForBuilding(string buildingId)
+        {
+            var list = new List<RecipeConfig>();
+            foreach (var r in _recipes.Values)
+            {
+                if (r.BuildingId == buildingId) list.Add(r);
+            }
+            return list;
+        }
+
+        public static List<RecipeConfig> GetAllRecipes()
+        {
+            return new List<RecipeConfig>(_recipes.Values);
+        }
     }
 }

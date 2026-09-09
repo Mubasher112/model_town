@@ -63,9 +63,28 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedProductionJob
+    {
+        public string JobId;
+        public string RecipeId;
+        public long StartUtcTicks;
+        public int State;
+        public bool XpAwarded;
+    }
+
+    [Serializable]
+    public class SavedProductionBuilding
+    {
+        public string BuildingInstanceId;
+        public string BuildingId;
+        public int QueueCapacity = 2;
+        public List<SavedProductionJob> JobsQueue = new List<SavedProductionJob>();
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 4;
+        public int Version = 5;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -73,6 +92,7 @@ namespace Game.Save
         public List<SavedRoadTile> RoadTiles = new List<SavedRoadTile>();
         public List<SavedField> Fields = new List<SavedField>();
         public List<SavedBuilding> Buildings = new List<SavedBuilding>();
+        public List<SavedProductionBuilding> ProductionBuildings = new List<SavedProductionBuilding>();
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
@@ -88,7 +108,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 4;
+        public const int CurrentSaveVersion = 5;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -169,6 +189,8 @@ namespace Game.Save
                 {
                     new InventoryItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 10),
                     new InventoryItem("seed_corn", "Corn Seeds", ItemType.Seed, 5),
+                    new InventoryItem("crop_wheat", "Wheat", ItemType.Crop, 10),
+                    new InventoryItem("crop_sugarcane", "Sugarcane", ItemType.Crop, 10),
                     new InventoryItem("wood", "Wood", ItemType.RawMaterial, 20),
                     new InventoryItem("stone", "Stone", ItemType.RawMaterial, 10)
                 }
@@ -198,6 +220,11 @@ namespace Game.Save
             if (data.Version < 4)
             {
                 if (data.Buildings == null) data.Buildings = new List<SavedBuilding>();
+            }
+
+            if (data.Version < 5)
+            {
+                if (data.ProductionBuildings == null) data.ProductionBuildings = new List<SavedProductionBuilding>();
             }
 
             data.Version = CurrentSaveVersion;
