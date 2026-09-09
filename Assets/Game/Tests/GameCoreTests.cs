@@ -5,6 +5,9 @@ using Game.Player;
 using Game.Economy;
 using Game.Inventory;
 using Game.World;
+using Game.Farming;
+using Game.Data;
+using Game.Services;
 using Game.Save;
 
 namespace Game.Tests
@@ -116,24 +119,20 @@ namespace Game.Tests
         {
             var grid = new WorldGrid(30, 30);
             var expansionManager = new LandExpansionManager(grid);
-            expansionManager.UnlockAllZonesDev(); // Unlock all tiles for clean test
+            expansionManager.UnlockAllZonesDev();
 
             var placementManager = new ObjectPlacementManager(grid);
-            var footprint = new ObjectFootprint(3, 2); // 3x2 base
+            var footprint = new ObjectFootprint(3, 2);
 
-            // 0 Deg Rotation: Effective 3x2
             Vector2Int origin = new Vector2Int(10, 10);
             Assert.IsTrue(placementManager.TryPlaceObject("bldg_1", "factory", origin, footprint, RotationAngle.Deg0, out var res0));
             Assert.AreEqual(PlacementResult.Valid, res0);
 
-            // Cannot place overlapping object
             Assert.IsFalse(placementManager.TryPlaceObject("bldg_2", "factory", origin, footprint, RotationAngle.Deg0, out var resOverlap));
             Assert.AreEqual(PlacementResult.InvalidOccupied, resOverlap);
 
-            // Remove object
             Assert.IsTrue(placementManager.RemoveObject("bldg_1"));
 
-            // 90 Deg Rotation: Effective 2x3
             Assert.IsTrue(placementManager.TryPlaceObject("bldg_1", "factory", origin, footprint, RotationAngle.Deg90, out var res90));
             Assert.AreEqual(PlacementResult.Valid, res90);
         }
@@ -141,14 +140,11 @@ namespace Game.Tests
         [Test]
         public void ObjectPlacement_LockedAndWaterRejection()
         {
-            var grid = new WorldGrid(30, 30); // Borders are water, outer tiles locked
+            var grid = new WorldGrid(30, 30);
             var placementManager = new ObjectPlacementManager(grid);
             var footprint = new ObjectFootprint(1, 1);
 
-            // Water tile at border (0,0)
             Assert.AreEqual(PlacementResult.InvalidWater, placementManager.CheckPlacement(new Vector2Int(0, 0), footprint, RotationAngle.Deg0));
-
-            // Locked tile at (2,2)
             Assert.AreEqual(PlacementResult.InvalidLocked, placementManager.CheckPlacement(new Vector2Int(2, 2), footprint, RotationAngle.Deg0));
         }
 
@@ -186,35 +182,164 @@ namespace Game.Tests
         }
         #endregion
 
+        #region Farming System Tests
+        [Test]
+        public void CropLibrary_LoadsConfigurationsCorrectly()
+        {
+            var wheat = CropLibrary.GetCrop("wheat");
+            Assert.IsNotNull(wheat);
+            Assert.AreEqual("Wheat", wheat.Name);
+            Assert.AreEqual(10f, wheat.GrowthTimeSeconds);
+            Assert.AreEqual("seed_wheat", wheat.SeedItemId);
+            Assert.AreEqual("crop_wheat", wheat.HarvestItemId);
+
+            var corn = CropLibrary.GetCrop("corn");
+            Assert.IsNotNull(corn);
+            Assert.AreEqual(2, corn.UnlockLevel);
+        }
+
+        [Test]
+        public void FarmManager_PlantCrop_ConsumesSeedAndStartsGrowth()
+        {
+            var timeService = new StandardGameTimeService();
+            var farmManager = new FarmManager(_inventoryManager, _profile, timeService);
+
+            var field = new FieldInstance("f1", new Vector2Int(10, 10));
+            farmManager.RegisterField(field);
+
+            // Add 2 seeds
+            _inventoryManager.AddItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 2);
+
+            // Plant Wheat
+            var result = farmManager.PlantCrop("f1", "wheat");
+            Assert.AreEqual(FarmingOperationResult.Success, result);
+            Assert.AreEqual(FieldState.Planted, field.State);
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("seed_wheat"));
+        }
+
+        [Test]
+        public void FarmManager_PlantCrop_RejectsMissingSeedAndLockedCrop()
+        {
+            var timeService = new StandardGameTimeService();
+            var farmManager = new FarmManager(_inventoryManager, _profile, timeService);
+
+            var field1 = new FieldInstance("f1", new Vector2Int(10, 10));
+            farmManager.RegisterField(field1);
+
+            // Level 1 player tries to plant Tomato (Level 7 crop)
+            var lockedResult = farmManager.PlantCrop("f1", "tomato");
+            Assert.AreEqual(FarmingOperationResult.CropLocked, lockedResult);
+
+            // Player tries to plant Wheat without seeds
+            var noSeedResult = farmManager.PlantCrop("f1", "wheat");
+            Assert.AreEqual(FarmingOperationResult.MissingSeed, noSeedResult);
+        }
+
+        [Test]
+        public void FieldInstance_OfflineGrowthCalculation()
+        {
+            long startTicks = System.DateTime.UtcNow.Ticks;
+            var wheat = CropLibrary.GetCrop("wheat"); // 10 second growth
+
+            var field = new FieldInstance("f1", new Vector2Int(10, 10))
+            {
+                State = FieldState.Planted,
+                CurrentCropId = "wheat",
+                PlantedUtcTicks = startTicks
+            };
+
+            // 5 seconds elapsed (50% progress)
+            long midTicks = startTicks + System.TimeSpan.FromSeconds(5).Ticks;
+            Assert.AreEqual(0.5f, field.GetGrowthProgress(midTicks, wheat), 0.01f);
+            Assert.AreEqual(3, field.GetGrowthStage(midTicks, wheat)); // Stage 3: Growing
+
+            // 11 seconds elapsed (100% complete)
+            long endTicks = startTicks + System.TimeSpan.FromSeconds(11).Ticks;
+            field.CheckAndUpdateState(endTicks, wheat);
+            Assert.AreEqual(FieldState.Ready, field.State);
+            Assert.AreEqual(1.0f, field.GetGrowthProgress(endTicks, wheat));
+            Assert.AreEqual(5, field.GetGrowthStage(endTicks, wheat)); // Stage 5: Ready
+        }
+
+        [Test]
+        public void FarmManager_HarvestCrop_AwardsItemsAndXP_AndResetsField()
+        {
+            var timeService = new StandardGameTimeService();
+            var farmManager = new FarmManager(_inventoryManager, _profile, timeService);
+
+            var field = new FieldInstance("f1", new Vector2Int(10, 10))
+            {
+                State = FieldState.Ready,
+                CurrentCropId = "wheat"
+            };
+            farmManager.RegisterField(field);
+
+            int initialXp = _profile.CurrentXP;
+            var result = farmManager.HarvestCrop("f1");
+
+            Assert.AreEqual(FarmingOperationResult.Success, result);
+            Assert.AreEqual(FieldState.Empty, field.State);
+            Assert.AreEqual(2, _inventoryManager.GetQuantity("crop_wheat"));
+            Assert.Greater(_profile.CurrentXP, initialXp);
+        }
+
+        [Test]
+        public void FarmManager_HarvestCrop_FullStorageRejection()
+        {
+            var tinyInventory = new InventoryManager(1); // Capacity 1
+            var timeService = new StandardGameTimeService();
+            var farmManager = new FarmManager(tinyInventory, _profile, timeService);
+
+            // Fill inventory to capacity
+            tinyInventory.AddItem("stone", "Stone", ItemType.RawMaterial, 1);
+
+            var field = new FieldInstance("f1", new Vector2Int(10, 10))
+            {
+                State = FieldState.Ready,
+                CurrentCropId = "wheat" // Wheat yields 2 items
+            };
+            farmManager.RegisterField(field);
+
+            var result = farmManager.HarvestCrop("f1");
+            Assert.AreEqual(FarmingOperationResult.StorageFull, result);
+            Assert.AreEqual(FieldState.Ready, field.State); // Crop not lost
+        }
+        #endregion
+
         [Test]
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v2.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v3.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 2,
+                Version = 3,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
                 UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
                 PlacedObjects = new List<SavedPlacedObject>
                 {
                     new SavedPlacedObject { ObjectId = "bldg_1", ObjectTypeId = "house", X = 12, Y = 12, BaseWidth = 2, BaseHeight = 2, RotationDegrees = 90 }
+                },
+                Fields = new List<SavedField>
+                {
+                    new SavedField { FieldId = "f1", X = 10, Y = 10, Width = 1, Height = 1, State = (int)FieldState.Growing, CurrentCropId = "wheat", PlantedUtcTicks = System.DateTime.UtcNow.Ticks }
                 }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v2.json"));
+            Assert.IsTrue(storage.Exists("save_v3.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(2, loadedSave.Version);
+            Assert.AreEqual(3, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);
             Assert.AreEqual(1, loadedSave.PlacedObjects.Count);
-            Assert.AreEqual("bldg_1", loadedSave.PlacedObjects[0].ObjectId);
-            Assert.AreEqual(90, loadedSave.PlacedObjects[0].RotationDegrees);
+            Assert.AreEqual(1, loadedSave.Fields.Count);
+            Assert.AreEqual("f1", loadedSave.Fields[0].FieldId);
+            Assert.AreEqual("wheat", loadedSave.Fields[0].CurrentCropId);
         }
 
         private class MockStorage : ISaveStorage

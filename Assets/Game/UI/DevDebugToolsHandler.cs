@@ -1,5 +1,7 @@
 using UnityEngine;
 using Game.World;
+using Game.Farming;
+using Game.Inventory;
 using Game.Save;
 
 namespace Game.UI
@@ -10,6 +12,8 @@ namespace Game.UI
         private ObjectPlacementManager _placementManager;
         private RoadManager _roadManager;
         private LandExpansionManager _expansionManager;
+        private FarmManager _farmManager;
+        private InventoryManager _inventoryManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -19,13 +23,17 @@ namespace Game.UI
             ObjectPlacementManager placementManager,
             RoadManager roadManager,
             LandExpansionManager expansionManager,
-            LocalSaveSystem saveSystem)
+            LocalSaveSystem saveSystem,
+            FarmManager farmManager = null,
+            InventoryManager inventoryManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
             _roadManager = roadManager;
             _expansionManager = expansionManager;
             _saveSystem = saveSystem;
+            _farmManager = farmManager;
+            _inventoryManager = inventoryManager;
         }
 
         public void ToggleDevMenu()
@@ -47,6 +55,30 @@ namespace Game.UI
                 foreach (var r in roads)
                 {
                     _roadManager.RemoveRoad(r);
+                }
+            }
+        }
+
+        public void DevGiveSeeds()
+        {
+            if (_inventoryManager != null)
+            {
+                _inventoryManager.AddItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 20);
+                _inventoryManager.AddItem("seed_corn", "Corn Seeds", ItemType.Seed, 20);
+                _inventoryManager.AddItem("seed_carrot", "Carrot Seeds", ItemType.Seed, 20);
+                _inventoryManager.AddItem("seed_sugarcane", "Sugarcane Seeds", ItemType.Seed, 20);
+                _inventoryManager.AddItem("seed_tomato", "Tomato Seeds", ItemType.Seed, 20);
+            }
+        }
+
+        public void DevInstantGrowAllFields()
+        {
+            if (_farmManager != null)
+            {
+                var fields = _farmManager.GetAllFields();
+                foreach (var field in fields)
+                {
+                    _farmManager.DevInstantGrow(field.FieldId);
                 }
             }
         }

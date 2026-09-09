@@ -33,14 +33,28 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedField
+    {
+        public string FieldId;
+        public int X;
+        public int Y;
+        public int Width = 1;
+        public int Height = 1;
+        public int State;
+        public string CurrentCropId;
+        public long PlantedUtcTicks;
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 2;
+        public int Version = 3;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
         public List<SavedPlacedObject> PlacedObjects = new List<SavedPlacedObject>();
         public List<SavedRoadTile> RoadTiles = new List<SavedRoadTile>();
+        public List<SavedField> Fields = new List<SavedField>();
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
@@ -56,7 +70,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 2;
+        public const int CurrentSaveVersion = 3;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -132,7 +146,13 @@ namespace Game.Save
                 },
                 UnlockedZoneIds = new List<string> { "zone_start" },
                 MapWidth = 30,
-                MapHeight = 30
+                MapHeight = 30,
+                // Add default starter seeds to inventory
+                InventoryItems = new List<InventoryItem>
+                {
+                    new InventoryItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 10),
+                    new InventoryItem("seed_corn", "Corn Seeds", ItemType.Seed, 5)
+                }
             };
             Save(data);
             return data;
@@ -150,6 +170,12 @@ namespace Game.Save
                 if (data.MapHeight <= 0) data.MapHeight = 30;
                 if (data.RoadTiles == null) data.RoadTiles = new List<SavedRoadTile>();
             }
+
+            if (data.Version < 3)
+            {
+                if (data.Fields == null) data.Fields = new List<SavedField>();
+            }
+
             data.Version = CurrentSaveVersion;
         }
 

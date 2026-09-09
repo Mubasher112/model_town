@@ -5,10 +5,12 @@ using Game.Player;
 using Game.Economy;
 using Game.Inventory;
 using Game.World;
+using Game.Farming;
 using Game.Save;
 using Game.Platforms;
 using Game.UI;
 using Game.Camera;
+using Game.Services;
 
 namespace Game.Core
 {
@@ -23,15 +25,18 @@ namespace Game.Core
         public ObjectPlacementManager PlacementManager { get; private set; }
         public RoadManager RoadManager { get; private set; }
         public LandExpansionManager ExpansionManager { get; private set; }
+        public StandardGameTimeService TimeService { get; private set; }
+        public FarmManager FarmManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
         [SerializeField] private MobileUIManager uiManager;
         [SerializeField] private TileSelectionHandler tileSelectionHandler;
         [SerializeField] private DevDebugToolsHandler devToolsHandler;
+        [SerializeField] private FarmingUIController farmingUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v2.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v3.json");
 
         private void Awake()
         {
@@ -51,6 +56,7 @@ namespace Game.Core
         {
             PlatformServices = PlatformServiceFactory.CreatePlatformServices();
             SaveSystem = new LocalSaveSystem(SaveFilePath);
+            TimeService = new StandardGameTimeService();
 
             LoadGame();
 
@@ -62,17 +68,67 @@ namespace Game.Core
             if (tileSelectionHandler != null)
             {
                 tileSelectionHandler.Initialize(WorldGrid);
+                tileSelectionHandler.OnTileSelected += HandleTileSelectedForFarming;
+            }
+
+            if (farmingUIController != null)
+            {
+                farmingUIController.Initialize(FarmManager, InventoryManager, PlayerProfile);
             }
 
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager);
             }
 
             if (cameraController != null)
             {
                 cameraController.SetBoundsFromGrid(WorldGrid);
             }
+        }
+
+        private void HandleTileSelectedForFarming(Vector2Int gridPos, TileData tile)
+        {
+            if (tile == null || FarmManager == null || farmingUIController == null) return;
+
+            if (tile.IsOccupied && !string.IsNullOrEmpty(tile.OccupyingObjectId))
+            {
+                var field = FarmManager.GetField(tile.OccupyingObjectId);
+                if (field != null)
+                {
+                    farmingUIController.OnFieldSelected(field);
+                    return;
+                }
+            }
+
+            farmingUIController.OnFieldSelected(null);
+        }
+
+        private void Update()
+        {
+            if (TimeService != null)
+            {
+                TimeService.UpdateCurrentTime();
+            }
+
+            if (FarmManager != null)
+            {
+                FarmManager.UpdateAllFieldStates();
+            }
+        }
+
+        public bool PlaceNewField(Vector2Int origin)
+        {
+            string fieldId = "field_" + System.Guid.NewGuid().ToString().Substring(0, 6);
+            var footprint = new ObjectFootprint(1, 1);
+
+            if (PlacementManager.TryPlaceObject(fieldId, "field", origin, footprint, RotationAngle.Deg0, out _))
+            {
+                var fieldInstance = new FieldInstance(fieldId, origin, 1, 1);
+                FarmManager.RegisterField(fieldInstance);
+                return true;
+            }
+            return false;
         }
 
         public void SaveGame()
@@ -108,6 +164,22 @@ namespace Game.Core
                 saveData.RoadTiles.Add(new SavedRoadTile(r.x, r.y));
             }
 
+            var fields = FarmManager.GetAllFields();
+            foreach (var f in fields)
+            {
+                saveData.Fields.Add(new SavedField
+                {
+                    FieldId = f.FieldId,
+                    X = f.GridPosition.x,
+                    Y = f.GridPosition.y,
+                    Width = f.Width,
+                    Height = f.Height,
+                    State = (int)f.State,
+                    CurrentCropId = f.CurrentCropId,
+                    PlantedUtcTicks = f.PlantedUtcTicks
+                });
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -133,6 +205,7 @@ namespace Game.Core
             PlacementManager = new ObjectPlacementManager(WorldGrid);
             RoadManager = new RoadManager(WorldGrid);
             ExpansionManager = new LandExpansionManager(WorldGrid);
+            FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
@@ -158,10 +231,35 @@ namespace Game.Core
                     PlacementManager.TryPlaceObject(obj.ObjectId, obj.ObjectTypeId, new Vector2Int(obj.X, obj.Y), footprint, rotation, out _);
                 }
             }
+
+            if (saveData.Fields != null)
+            {
+                foreach (var sf in saveData.Fields)
+                {
+                    var fieldInstance = new FieldInstance(sf.FieldId, new Vector2Int(sf.X, sf.Y), sf.Width, sf.Height)
+                    {
+                        State = (FieldState)sf.State,
+                        CurrentCropId = sf.CurrentCropId,
+                        PlantedUtcTicks = sf.PlantedUtcTicks
+                    };
+
+                    if (PlacementManager.GetPlacedObject(sf.FieldId) == null)
+                    {
+                        var footprint = new ObjectFootprint(sf.Width, sf.Height);
+                        PlacementManager.TryPlaceObject(sf.FieldId, "field", new Vector2Int(sf.X, sf.Y), footprint, RotationAngle.Deg0, out _);
+                    }
+
+                    FarmManager.RegisterField(fieldInstance);
+                }
+            }
         }
 
         private void OnDestroy()
         {
+            if (tileSelectionHandler != null)
+            {
+                tileSelectionHandler.OnTileSelected -= HandleTileSelectedForFarming;
+            }
             SaveGame();
         }
     }
