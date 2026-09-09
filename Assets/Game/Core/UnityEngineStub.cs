@@ -244,6 +244,11 @@ namespace UnityEngine
         {
             public string text { get; set; } = string.Empty;
         }
+
+        public class Button
+        {
+            public bool interactable { get; set; } = true;
+        }
     }
 
     public static class JsonUtility

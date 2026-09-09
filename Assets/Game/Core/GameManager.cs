@@ -6,6 +6,8 @@ using Game.Economy;
 using Game.Inventory;
 using Game.World;
 using Game.Farming;
+using Game.Buildings;
+using Game.Data;
 using Game.Save;
 using Game.Platforms;
 using Game.UI;
@@ -27,6 +29,7 @@ namespace Game.Core
         public LandExpansionManager ExpansionManager { get; private set; }
         public StandardGameTimeService TimeService { get; private set; }
         public FarmManager FarmManager { get; private set; }
+        public BuildingManager BuildingManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
@@ -34,9 +37,11 @@ namespace Game.Core
         [SerializeField] private TileSelectionHandler tileSelectionHandler;
         [SerializeField] private DevDebugToolsHandler devToolsHandler;
         [SerializeField] private FarmingUIController farmingUIController;
+        [SerializeField] private BuildMenuUIController buildMenuUIController;
+        [SerializeField] private BuildingInfoUIController buildingInfoUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v3.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v4.json");
 
         private void Awake()
         {
@@ -68,7 +73,7 @@ namespace Game.Core
             if (tileSelectionHandler != null)
             {
                 tileSelectionHandler.Initialize(WorldGrid);
-                tileSelectionHandler.OnTileSelected += HandleTileSelectedForFarming;
+                tileSelectionHandler.OnTileSelected += HandleTileSelectedForInteractions;
             }
 
             if (farmingUIController != null)
@@ -76,9 +81,19 @@ namespace Game.Core
                 farmingUIController.Initialize(FarmManager, InventoryManager, PlayerProfile);
             }
 
+            if (buildMenuUIController != null)
+            {
+                buildMenuUIController.Initialize(BuildingManager, PlayerProfile, EconomyManager, InventoryManager);
+            }
+
+            if (buildingInfoUIController != null)
+            {
+                buildingInfoUIController.Initialize(BuildingManager, EconomyManager, PlayerProfile);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager);
             }
 
             if (cameraController != null)
@@ -87,21 +102,39 @@ namespace Game.Core
             }
         }
 
-        private void HandleTileSelectedForFarming(Vector2Int gridPos, TileData tile)
+        private void HandleTileSelectedForInteractions(Vector2Int gridPos, TileData tile)
         {
-            if (tile == null || FarmManager == null || farmingUIController == null) return;
+            if (tile == null) return;
 
             if (tile.IsOccupied && !string.IsNullOrEmpty(tile.OccupyingObjectId))
             {
-                var field = FarmManager.GetField(tile.OccupyingObjectId);
-                if (field != null)
+                // Check if it's a field
+                if (FarmManager != null)
                 {
-                    farmingUIController.OnFieldSelected(field);
-                    return;
+                    var field = FarmManager.GetField(tile.OccupyingObjectId);
+                    if (field != null)
+                    {
+                        if (farmingUIController != null) farmingUIController.OnFieldSelected(field);
+                        if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+                        return;
+                    }
+                }
+
+                // Check if it's a building
+                if (BuildingManager != null)
+                {
+                    var b = BuildingManager.GetBuilding(tile.OccupyingObjectId);
+                    if (b != null)
+                    {
+                        if (buildingInfoUIController != null) buildingInfoUIController.OnBuildingSelected(b);
+                        if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
+                        return;
+                    }
                 }
             }
 
-            farmingUIController.OnFieldSelected(null);
+            if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
+            if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
         }
 
         private void Update()
@@ -114,6 +147,11 @@ namespace Game.Core
             if (FarmManager != null)
             {
                 FarmManager.UpdateAllFieldStates();
+            }
+
+            if (BuildingManager != null)
+            {
+                BuildingManager.UpdateAllBuildingStates();
             }
         }
 
@@ -180,6 +218,27 @@ namespace Game.Core
                 });
             }
 
+            var buildings = BuildingManager.GetAllBuildings();
+            foreach (var b in buildings)
+            {
+                var bConfig = BuildingLibrary.GetBuilding(b.BuildingId);
+                saveData.Buildings.Add(new SavedBuilding
+                {
+                    InstanceId = b.InstanceId,
+                    BuildingId = b.BuildingId,
+                    X = b.GridPosition.x,
+                    Y = b.GridPosition.y,
+                    BaseWidth = bConfig != null ? bConfig.Width : 1,
+                    BaseHeight = bConfig != null ? bConfig.Height : 1,
+                    RotationDegrees = (int)b.Rotation,
+                    Level = b.Level,
+                    State = (int)b.State,
+                    ConstructionStartUtcTicks = b.ConstructionStartUtcTicks,
+                    UpgradeStartUtcTicks = b.UpgradeStartUtcTicks,
+                    CompletionXpAwarded = b.CompletionXpAwarded
+                });
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -206,6 +265,7 @@ namespace Game.Core
             RoadManager = new RoadManager(WorldGrid);
             ExpansionManager = new LandExpansionManager(WorldGrid);
             FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
+            BuildingManager = new BuildingManager(PlacementManager, EconomyManager, InventoryManager, PlayerProfile, TimeService);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
@@ -252,13 +312,40 @@ namespace Game.Core
                     FarmManager.RegisterField(fieldInstance);
                 }
             }
+
+            if (saveData.Buildings != null)
+            {
+                foreach (var sb in saveData.Buildings)
+                {
+                    var bConfig = BuildingLibrary.GetBuilding(sb.BuildingId);
+                    int w = bConfig != null ? bConfig.Width : sb.BaseWidth;
+                    int h = bConfig != null ? bConfig.Height : sb.BaseHeight;
+
+                    var bInstance = new BuildingInstance(sb.InstanceId, sb.BuildingId, new Vector2Int(sb.X, sb.Y), (RotationAngle)sb.RotationDegrees)
+                    {
+                        Level = sb.Level,
+                        State = (BuildingState)sb.State,
+                        ConstructionStartUtcTicks = sb.ConstructionStartUtcTicks,
+                        UpgradeStartUtcTicks = sb.UpgradeStartUtcTicks,
+                        CompletionXpAwarded = sb.CompletionXpAwarded
+                    };
+
+                    if (PlacementManager.GetPlacedObject(sb.InstanceId) == null)
+                    {
+                        var footprint = new ObjectFootprint(w, h);
+                        PlacementManager.TryPlaceObject(sb.InstanceId, sb.BuildingId, new Vector2Int(sb.X, sb.Y), footprint, (RotationAngle)sb.RotationDegrees, out _);
+                    }
+
+                    BuildingManager.RegisterBuilding(bInstance);
+                }
+            }
         }
 
         private void OnDestroy()
         {
             if (tileSelectionHandler != null)
             {
-                tileSelectionHandler.OnTileSelected -= HandleTileSelectedForFarming;
+                tileSelectionHandler.OnTileSelected -= HandleTileSelectedForInteractions;
             }
             SaveGame();
         }

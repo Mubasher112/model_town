@@ -6,6 +6,7 @@ using Game.Economy;
 using Game.Inventory;
 using Game.World;
 using Game.Farming;
+using Game.Buildings;
 using Game.Data;
 using Game.Services;
 using Game.Save;
@@ -207,10 +208,8 @@ namespace Game.Tests
             var field = new FieldInstance("f1", new Vector2Int(10, 10));
             farmManager.RegisterField(field);
 
-            // Add 2 seeds
             _inventoryManager.AddItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 2);
 
-            // Plant Wheat
             var result = farmManager.PlantCrop("f1", "wheat");
             Assert.AreEqual(FarmingOperationResult.Success, result);
             Assert.AreEqual(FieldState.Planted, field.State);
@@ -226,11 +225,9 @@ namespace Game.Tests
             var field1 = new FieldInstance("f1", new Vector2Int(10, 10));
             farmManager.RegisterField(field1);
 
-            // Level 1 player tries to plant Tomato (Level 7 crop)
             var lockedResult = farmManager.PlantCrop("f1", "tomato");
             Assert.AreEqual(FarmingOperationResult.CropLocked, lockedResult);
 
-            // Player tries to plant Wheat without seeds
             var noSeedResult = farmManager.PlantCrop("f1", "wheat");
             Assert.AreEqual(FarmingOperationResult.MissingSeed, noSeedResult);
         }
@@ -239,7 +236,7 @@ namespace Game.Tests
         public void FieldInstance_OfflineGrowthCalculation()
         {
             long startTicks = System.DateTime.UtcNow.Ticks;
-            var wheat = CropLibrary.GetCrop("wheat"); // 10 second growth
+            var wheat = CropLibrary.GetCrop("wheat");
 
             var field = new FieldInstance("f1", new Vector2Int(10, 10))
             {
@@ -248,17 +245,15 @@ namespace Game.Tests
                 PlantedUtcTicks = startTicks
             };
 
-            // 5 seconds elapsed (50% progress)
             long midTicks = startTicks + System.TimeSpan.FromSeconds(5).Ticks;
             Assert.AreEqual(0.5f, field.GetGrowthProgress(midTicks, wheat), 0.01f);
-            Assert.AreEqual(3, field.GetGrowthStage(midTicks, wheat)); // Stage 3: Growing
+            Assert.AreEqual(3, field.GetGrowthStage(midTicks, wheat));
 
-            // 11 seconds elapsed (100% complete)
             long endTicks = startTicks + System.TimeSpan.FromSeconds(11).Ticks;
             field.CheckAndUpdateState(endTicks, wheat);
             Assert.AreEqual(FieldState.Ready, field.State);
             Assert.AreEqual(1.0f, field.GetGrowthProgress(endTicks, wheat));
-            Assert.AreEqual(5, field.GetGrowthStage(endTicks, wheat)); // Stage 5: Ready
+            Assert.AreEqual(5, field.GetGrowthStage(endTicks, wheat));
         }
 
         [Test]
@@ -286,23 +281,137 @@ namespace Game.Tests
         [Test]
         public void FarmManager_HarvestCrop_FullStorageRejection()
         {
-            var tinyInventory = new InventoryManager(1); // Capacity 1
+            var tinyInventory = new InventoryManager(1);
             var timeService = new StandardGameTimeService();
             var farmManager = new FarmManager(tinyInventory, _profile, timeService);
 
-            // Fill inventory to capacity
             tinyInventory.AddItem("stone", "Stone", ItemType.RawMaterial, 1);
 
             var field = new FieldInstance("f1", new Vector2Int(10, 10))
             {
                 State = FieldState.Ready,
-                CurrentCropId = "wheat" // Wheat yields 2 items
+                CurrentCropId = "wheat"
             };
             farmManager.RegisterField(field);
 
             var result = farmManager.HarvestCrop("f1");
             Assert.AreEqual(FarmingOperationResult.StorageFull, result);
-            Assert.AreEqual(FieldState.Ready, field.State); // Crop not lost
+            Assert.AreEqual(FieldState.Ready, field.State);
+        }
+        #endregion
+
+        #region Buildings & Construction System Tests
+        [Test]
+        public void BuildingLibrary_LoadsConfigurationsCorrectly()
+        {
+            var house = BuildingLibrary.GetBuilding("small_house");
+            Assert.IsNotNull(house);
+            Assert.AreEqual("Small House", house.Name);
+            Assert.AreEqual(2, house.Width);
+            Assert.AreEqual(2, house.Height);
+            Assert.AreEqual(5, house.PopulationCapacity);
+
+            var barn = BuildingLibrary.GetBuilding("barn");
+            Assert.IsNotNull(barn);
+            Assert.AreEqual(20, barn.StorageCapacityBonus);
+        }
+
+        [Test]
+        public void BuildingManager_StartConstruction_DeductsResourcesAndStartsTimer()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+
+            long initialCoins = _profile.Coins;
+            var result = buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
+
+            Assert.AreEqual(BuildingOperationResult.Success, result);
+            Assert.IsNotNull(instance);
+            Assert.AreEqual(BuildingState.UnderConstruction, instance.State);
+            Assert.AreEqual(initialCoins - 100, _profile.Coins); // 100 coin cost deducted
+        }
+
+        [Test]
+        public void BuildingManager_StartConstruction_RejectsInsufficientCoins()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Coins = 10; // Insufficient coins for small house (cost 100)
+            var result = buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
+
+            Assert.AreEqual(BuildingOperationResult.CannotAffordCoins, result);
+            Assert.IsNull(instance);
+        }
+
+        [Test]
+        public void BuildingInstance_OfflineConstructionAndIdempotentCompletion()
+        {
+            long startTicks = System.DateTime.UtcNow.Ticks;
+            var houseConfig = BuildingLibrary.GetBuilding("small_house"); // 15s construction
+
+            var instance = new BuildingInstance("bldg_1", "small_house", new Vector2Int(10, 10))
+            {
+                State = BuildingState.UnderConstruction,
+                ConstructionStartUtcTicks = startTicks
+            };
+
+            // 5s elapsed
+            long midTicks = startTicks + System.TimeSpan.FromSeconds(5).Ticks;
+            Assert.AreEqual(0.33f, instance.GetConstructionProgress(midTicks, houseConfig), 0.05f);
+
+            // 16s elapsed -> Complete
+            long endTicks = startTicks + System.TimeSpan.FromSeconds(16).Ticks;
+            Assert.IsTrue(instance.CheckAndUpdateState(endTicks, houseConfig));
+            Assert.AreEqual(BuildingState.Completed, instance.State);
+            Assert.AreEqual(1.0f, instance.GetConstructionProgress(endTicks, houseConfig));
+        }
+
+        [Test]
+        public void BuildingManager_BarnConstruction_ExpandsInventoryStorageCapacity()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+
+            Assert.AreEqual(50, _inventoryManager.MaxCapacity);
+
+            buildingManager.StartConstruction("barn", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
+            buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
+
+            // Barn provides +20 storage capacity bonus
+            Assert.AreEqual(120, _inventoryManager.MaxCapacity);
+        }
+
+        [Test]
+        public void BuildingManager_BuildingUpgrades_IncreasesLevelAndPopulationCapacity()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+
+            buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
+            buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
+
+            Assert.AreEqual(5, buildingManager.TotalPopulationCapacity);
+
+            // Upgrade Small House
+            var result = buildingManager.StartUpgrade(instance.InstanceId);
+            Assert.AreEqual(BuildingOperationResult.Success, result);
+            buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
+
+            Assert.AreEqual(2, instance.Level);
+            Assert.AreEqual(10, buildingManager.TotalPopulationCapacity); // Base 5 + 5 upgrade bonus
         }
         #endregion
 
@@ -310,11 +419,11 @@ namespace Game.Tests
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v3.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v4.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 3,
+                Version = 4,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
                 UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
@@ -325,21 +434,26 @@ namespace Game.Tests
                 Fields = new List<SavedField>
                 {
                     new SavedField { FieldId = "f1", X = 10, Y = 10, Width = 1, Height = 1, State = (int)FieldState.Growing, CurrentCropId = "wheat", PlantedUtcTicks = System.DateTime.UtcNow.Ticks }
+                },
+                Buildings = new List<SavedBuilding>
+                {
+                    new SavedBuilding { InstanceId = "b1", BuildingId = "small_house", X = 15, Y = 15, BaseWidth = 2, BaseHeight = 2, RotationDegrees = 0, Level = 1, State = (int)BuildingState.Completed }
                 }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v3.json"));
+            Assert.IsTrue(storage.Exists("save_v4.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(3, loadedSave.Version);
+            Assert.AreEqual(4, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);
             Assert.AreEqual(1, loadedSave.PlacedObjects.Count);
             Assert.AreEqual(1, loadedSave.Fields.Count);
-            Assert.AreEqual("f1", loadedSave.Fields[0].FieldId);
-            Assert.AreEqual("wheat", loadedSave.Fields[0].CurrentCropId);
+            Assert.AreEqual(1, loadedSave.Buildings.Count);
+            Assert.AreEqual("b1", loadedSave.Buildings[0].InstanceId);
+            Assert.AreEqual("small_house", loadedSave.Buildings[0].BuildingId);
         }
 
         private class MockStorage : ISaveStorage

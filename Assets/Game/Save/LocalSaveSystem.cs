@@ -46,15 +46,33 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedBuilding
+    {
+        public string InstanceId;
+        public string BuildingId;
+        public int X;
+        public int Y;
+        public int BaseWidth = 1;
+        public int BaseHeight = 1;
+        public int RotationDegrees = 0;
+        public int Level = 1;
+        public int State;
+        public long ConstructionStartUtcTicks;
+        public long UpgradeStartUtcTicks;
+        public bool CompletionXpAwarded;
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 3;
+        public int Version = 4;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
         public List<SavedPlacedObject> PlacedObjects = new List<SavedPlacedObject>();
         public List<SavedRoadTile> RoadTiles = new List<SavedRoadTile>();
         public List<SavedField> Fields = new List<SavedField>();
+        public List<SavedBuilding> Buildings = new List<SavedBuilding>();
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
@@ -70,7 +88,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 3;
+        public const int CurrentSaveVersion = 4;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -147,11 +165,12 @@ namespace Game.Save
                 UnlockedZoneIds = new List<string> { "zone_start" },
                 MapWidth = 30,
                 MapHeight = 30,
-                // Add default starter seeds to inventory
                 InventoryItems = new List<InventoryItem>
                 {
                     new InventoryItem("seed_wheat", "Wheat Seeds", ItemType.Seed, 10),
-                    new InventoryItem("seed_corn", "Corn Seeds", ItemType.Seed, 5)
+                    new InventoryItem("seed_corn", "Corn Seeds", ItemType.Seed, 5),
+                    new InventoryItem("wood", "Wood", ItemType.RawMaterial, 20),
+                    new InventoryItem("stone", "Stone", ItemType.RawMaterial, 10)
                 }
             };
             Save(data);
@@ -174,6 +193,11 @@ namespace Game.Save
             if (data.Version < 3)
             {
                 if (data.Fields == null) data.Fields = new List<SavedField>();
+            }
+
+            if (data.Version < 4)
+            {
+                if (data.Buildings == null) data.Buildings = new List<SavedBuilding>();
             }
 
             data.Version = CurrentSaveVersion;

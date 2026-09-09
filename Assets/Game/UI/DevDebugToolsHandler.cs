@@ -1,7 +1,9 @@
 using UnityEngine;
 using Game.World;
 using Game.Farming;
+using Game.Buildings;
 using Game.Inventory;
+using Game.Economy;
 using Game.Save;
 
 namespace Game.UI
@@ -14,6 +16,8 @@ namespace Game.UI
         private LandExpansionManager _expansionManager;
         private FarmManager _farmManager;
         private InventoryManager _inventoryManager;
+        private BuildingManager _buildingManager;
+        private EconomyManager _economyManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -25,7 +29,9 @@ namespace Game.UI
             LandExpansionManager expansionManager,
             LocalSaveSystem saveSystem,
             FarmManager farmManager = null,
-            InventoryManager inventoryManager = null)
+            InventoryManager inventoryManager = null,
+            BuildingManager buildingManager = null,
+            EconomyManager economyManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -34,6 +40,8 @@ namespace Game.UI
             _saveSystem = saveSystem;
             _farmManager = farmManager;
             _inventoryManager = inventoryManager;
+            _buildingManager = buildingManager;
+            _economyManager = economyManager;
         }
 
         public void ToggleDevMenu()
@@ -59,6 +67,21 @@ namespace Game.UI
             }
         }
 
+        public void DevGiveCoinsAndGems()
+        {
+            _economyManager?.EarnCoins(5000);
+            _economyManager?.EarnGems(100);
+        }
+
+        public void DevGiveMaterials()
+        {
+            if (_inventoryManager != null)
+            {
+                _inventoryManager.AddItem("wood", "Wood", ItemType.RawMaterial, 50);
+                _inventoryManager.AddItem("stone", "Stone", ItemType.RawMaterial, 50);
+            }
+        }
+
         public void DevGiveSeeds()
         {
             if (_inventoryManager != null)
@@ -79,6 +102,18 @@ namespace Game.UI
                 foreach (var field in fields)
                 {
                     _farmManager.DevInstantGrow(field.FieldId);
+                }
+            }
+        }
+
+        public void DevInstantCompleteAllConstructions()
+        {
+            if (_buildingManager != null)
+            {
+                var buildings = _buildingManager.GetAllBuildings();
+                foreach (var b in buildings)
+                {
+                    _buildingManager.DevInstantCompleteConstruction(b.InstanceId);
                 }
             }
         }

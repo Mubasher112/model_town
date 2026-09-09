@@ -4,6 +4,16 @@ using Game.Inventory;
 
 namespace Game.Data
 {
+    public enum BuildingCategory
+    {
+        Residential,
+        Farming,
+        Storage,
+        Community,
+        Decoration,
+        Production
+    }
+
     [Serializable]
     public class ItemConfig
     {
@@ -20,13 +30,110 @@ namespace Game.Data
     {
         public string BuildingId;
         public string Name;
+        public string Description;
+        public BuildingCategory Category;
         public int Width = 1;
         public int Height = 1;
         public long BuildCostCoins;
         public int BuildCostGems;
-        public float BuildTimeSeconds;
-        public int UnlockLevel;
-        public int XpReward;
+        public List<RecipeIngredient> RequiredMaterials = new List<RecipeIngredient>();
+        public float ConstructionTimeSeconds;
+        public int UnlockLevel = 1;
+        public int XpReward = 10;
+        public int PopulationCapacity = 0;
+        public int StorageCapacityBonus = 0;
+        public int MaxUpgradeLevel = 2;
+
+        // Upgrade config
+        public long UpgradeCostCoins = 200;
+        public float UpgradeTimeSeconds = 30f;
+        public int UpgradePopulationBonus = 5;
+        public int UpgradeStorageBonus = 20;
+
+        public BuildingConfig() { }
+
+        public BuildingConfig(
+            string buildingId,
+            string name,
+            string description,
+            BuildingCategory category,
+            int width,
+            int height,
+            long buildCostCoins,
+            float constructionTimeSeconds,
+            int unlockLevel = 1,
+            int xpReward = 10,
+            int populationCapacity = 0,
+            int storageCapacityBonus = 0)
+        {
+            BuildingId = buildingId;
+            Name = name;
+            Description = description;
+            Category = category;
+            Width = width;
+            Height = height;
+            BuildCostCoins = buildCostCoins;
+            ConstructionTimeSeconds = constructionTimeSeconds;
+            UnlockLevel = unlockLevel;
+            XpReward = xpReward;
+            PopulationCapacity = populationCapacity;
+            StorageCapacityBonus = storageCapacityBonus;
+        }
+    }
+
+    public static class BuildingLibrary
+    {
+        private static readonly Dictionary<string, BuildingConfig> _buildings = new Dictionary<string, BuildingConfig>
+        {
+            {
+                "small_house",
+                new BuildingConfig("small_house", "Small House", "Increases town population capacity.", BuildingCategory.Residential, 2, 2, 100, 15f, unlockLevel: 1, xpReward: 15, populationCapacity: 5)
+            },
+            {
+                "family_house",
+                new BuildingConfig("family_house", "Family House", "Provides higher population capacity for growing towns.", BuildingCategory.Residential, 3, 2, 300, 45f, unlockLevel: 2, xpReward: 35, populationCapacity: 12)
+            },
+            {
+                "barn",
+                new BuildingConfig("barn", "Barn", "Increases inventory storage capacity.", BuildingCategory.Storage, 3, 3, 250, 30f, unlockLevel: 1, xpReward: 25, storageCapacityBonus: 20)
+            },
+            {
+                "town_hall",
+                new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50)
+            },
+            {
+                "tree",
+                new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2)
+            },
+            {
+                "flower_bed",
+                new BuildingConfig("flower_bed", "Flower Bed", "Colorful flower bed decoration.", BuildingCategory.Decoration, 1, 1, 30, 0f, unlockLevel: 1, xpReward: 3)
+            },
+            {
+                "small_fountain",
+                new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15)
+            }
+        };
+
+        public static BuildingConfig GetBuilding(string buildingId)
+        {
+            return _buildings.TryGetValue(buildingId, out var config) ? config : null;
+        }
+
+        public static List<BuildingConfig> GetAllBuildings()
+        {
+            return new List<BuildingConfig>(_buildings.Values);
+        }
+
+        public static List<BuildingConfig> GetBuildingsByCategory(BuildingCategory category)
+        {
+            var result = new List<BuildingConfig>();
+            foreach (var b in _buildings.Values)
+            {
+                if (b.Category == category) result.Add(b);
+            }
+            return result;
+        }
     }
 
     [Serializable]
@@ -109,6 +216,14 @@ namespace Game.Data
     {
         public string ItemId;
         public int Quantity;
+
+        public RecipeIngredient() { }
+
+        public RecipeIngredient(string itemId, int quantity)
+        {
+            ItemId = itemId;
+            Quantity = quantity;
+        }
     }
 
     [Serializable]
