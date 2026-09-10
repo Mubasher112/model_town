@@ -21,7 +21,7 @@ Assets/Game/
 ├── Buildings/   # BuildingInstance, BuildingManager, BuildingStates, BuildingAccessibilityService
 ├── Camera/      # Mobile camera controller (Pan, Pinch-to-zoom, bounds switching)
 ├── Core/        # GameManager and Bootstrap initialization
-├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData)
+├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData, SocialData)
 ├── Economy/     # EconomyManager for centralized coin/gem/XP transactions
 ├── Farming/     # FarmManager, FieldInstance, CropGrowthSystem, FieldStates
 ├── Input/       # MobileInputManager supporting Tap, Drag, Pinch, Long Press
@@ -31,10 +31,11 @@ Assets/Game/
 ├── Player/      # PlayerProfile (Level, XP, Coins, Gems)
 ├── Production/  # ProductionManager, ProductionJob, ProductionBuildingInstance, ProductionStates
 ├── Residents/   # PopulationManager, HappinessManager, ResidentInstance, HappinessModifier, PopulationStats
-├── Save/        # LocalSaveSystem (Versioned JSON save v9, corruption recovery)
-├── Services/    # EnergyManager, ToolService, ExplorationService, GameTimeService, Abstractions
+├── Save/        # LocalSaveSystem (Versioned JSON save v10, corruption recovery)
+├── Services/    # EnergyManager, ToolService, ExplorationService, MockSocialService, ISocialService, ILeaderboardService
+├── Social/      # SocialManager (TownMode transitions, Read-Only Visit Mode, Appreciations, Gifts)
 ├── Tests/       # Automated NUnit test suite & Assembly Definition
-├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, DevDebugToolsHandler
+├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, SocialUIController, DevDebugToolsHandler
 └── World/       # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer, ResidentWorldRenderer
 ```
 
@@ -43,62 +44,56 @@ Assets/Game/
 ## 3. Core Gameplay Loop Integration
 
 ```
-Explore & Mine → Collect Raw Resources → Process in Factories → Fulfill Orders & Build Town → Expand Land & Roads
+Explore & Mine → Process Resources → Build Town & Expand → Connect Socially & Visit Friends
 ```
 
-1. **Adventure & Mining**: Unlock "Ancient Valley" (Level 8, 1,000 Coins, 10 Pop). Move around a 25x25 grid map, discover hidden areas, spend ⚡ energy and tool durability (Pickaxe, Axe, Shovel) to mine Stone, Wood, Clay, Iron Ore, and Rare Crystals.
-2. **Farming & Production**: Plant crops and convert raw materials (e.g. Clay x3 → Brick x1) into manufactured goods.
-3. **Construction**: Use gathered resources (e.g. Wood x10 + Stone x5) to build specialized buildings like the Small Workshop.
-4. **Orders & Economy**: Deliver products to customers for coins/XP rewards.
-5. **Land & Population**: Expand town boundaries, construct housing, and manage residents and happiness.
+1. **Adventure & Mining**: Unlock "Ancient Valley", mine Stone, Wood, Clay, Ore, Crystals using tools and ⚡ energy.
+2. **Farming & Production**: Process raw resources into manufactured products (Flour, Bread, Bricks).
+3. **Construction & Expansion**: Expand land, build housing, community facilities, and workshops.
+4. **Social & Friends**: Search players, send/accept friend requests, send daily gifts, appreciate towns, and visit friend towns in read-only snapshot mode without editing their world.
 
 ---
 
-## 4. Adventure, Mining & Energy System
+## 4. Social & Friends Architecture
 
-### Energy Regeneration & Clamping
-- **Energy Pool**: Default capacity of 20 ⚡ energy.
-- **UTC Offline Regeneration**: Regenerates 1 ⚡ every 5 minutes (300 seconds) using UTC timestamps. Energy recalculates dynamically when the app opens or after returning from background.
+### Service Interfaces & Offline Resiliency
+- **`ISocialService`**: Asynchronous interface for `GetMyProfile`, `UpdateProfile`, `SearchPlayers`, `GetFriendsList`, `SendFriendRequest`, `AcceptFriendRequest`, `RejectFriendRequest`, `RemoveFriend`, `VisitTown`, `AppreciateTown`, `SendGift`, `BlockPlayer`, `ReportPlayer`.
+- **`MockSocialService`**: In-memory local social provider for offline testing and development with pre-configured mock player towns (`Sunny Valley`, `Green Farm`, `Happy Town`, `River Bend`).
+- **Offline Behavior**: When `ISocialService.IsOnline == false`, social requests fail gracefully with user-friendly messages while local single-player town gameplay, farming, and adventure remain 100% functional.
 
-### Tools & Durability
-- **Tool Inventory**: Pickaxe (Max 30), Axe (Max 30), Shovel (Max 25).
-- **Gathering Validation**: Gathering checks energy, tool availability, tool durability, and inventory space before deducting costs.
-
-### Exploration & Fog of War
-- **Exploration Map**: 25x25 grid containing Stone Deposits, Trees, Clay Pits, Iron Ore Veins, Crystal Geodes, Boulders, Fallen Logs, and Special Locations (Ancient Ruins, Abandoned Mine, Hidden Grove).
-- **Discovery Radius**: Player movement reveals nearby hidden cells within a 3-cell radius.
+### Read-Only Town Visit Mode
+- **Snapshot Representation**: `TownSnapshot` encapsulates building positions, road grids, population, and happiness stats without exposing private tokens or auth credentials.
+- **`GameTownMode.FriendVisit`**: Switching town mode disables building placement, road editing, crop harvesting, and inventory changes, displaying a "VISITING [Player Name] (Read-Only)" UI banner with a single-tap "Return to My Town" option.
 
 ---
 
-## 5. Save System Schema (Version 9)
+## 5. Save System Schema (Version 10)
 
-The save system supports automatic migration up to `SaveDataVersion = 9` (`save_v9.json`):
+The save system supports automatic migration up to `SaveDataVersion = 10` (`save_v10.json`):
 - Player Profile & Unlocked Zone IDs
-- Main World Objects, Fields, Buildings, Roads
-- Production Building Queues & Customer Order History
+- World Objects, Fields, Buildings, Roads
+- Production Building Queues & Order History
 - Resident Instances & Housing Assignments
-- **Adventure Unlocked State & Player Coordinates**
-- **Energy State (Current Energy, Last Regen UTC Ticks)**
-- **Tool Durability Instances**
-- **Discovered Adventure Grid Cells**
-- **Adventure Node States & Respawn UTC Timestamps**
-- **Discovered Special Locations**
+- Adventure Grid, Energy State, Tool Durabilities
+- **Local Social Profile (Display Name, Avatar ID)**
+- **Cached Friend Relationships**
+- **Blocked Player IDs**
+- **Claimed Gift IDs & Appreciated Town IDs**
 
 ---
 
 ## 6. Development & Debug Tools
-`DevDebugToolsHandler` provides developer convenience methods during testing:
-- **Unlock Adventure**: Unlocks Ancient Valley adventure area instantly.
-- **Reveal Adventure Map**: Uncovers all fog of war on the adventure grid.
-- **Clear Adventure Obstacles**: Permanently clears all boulders and logs.
-- **Refill Adventure Energy**: Sets energy to max 20 ⚡.
-- **Give Adventure Resources**: Grants Stone, Wood, Clay, Iron Ore, Rare Crystals, and Bricks.
-- **Give Coins / Gems / Seeds / Materials**: Standard resource shortcuts.
+`DevDebugToolsHandler` provides social debug shortcuts:
+- **Simulate Offline / Online**: Toggles network availability for social services.
+- **Send Mock Friend Request**: Sends a friend request to `p_sunny`.
+- **Accept All Requests**: Auto-accepts incoming friend requests.
+- **Visit Mock Town**: Loads Sunny Valley in Read-Only Visit Mode.
+- **Return From Visit**: Returns to player's home town.
 
 ---
 
 ## 7. Running Automated Tests
-Run all 50 automated unit tests directly via .NET CLI:
+Run all 58 automated unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```

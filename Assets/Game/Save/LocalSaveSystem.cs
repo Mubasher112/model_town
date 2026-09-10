@@ -159,7 +159,7 @@ namespace Game.Save
     [Serializable]
     public class SaveData
     {
-        public int Version = 9;
+        public int Version = 10;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -184,6 +184,13 @@ namespace Game.Save
         public List<SavedAdventureCell> DiscoveredAdventureCells = new List<SavedAdventureCell>();
         public List<SavedAdventureNode> AdventureNodes = new List<SavedAdventureNode>();
         public List<string> DiscoveredSpecialLocations = new List<string>();
+
+        // Social Persistence Fields (v10)
+        public SocialProfile LocalSocialProfile = new SocialProfile();
+        public List<FriendRelationship> CachedFriends = new List<FriendRelationship>();
+        public List<string> BlockedPlayerIds = new List<string>();
+        public List<string> ClaimedGiftIds = new List<string>();
+        public List<string> AppreciatedPlayerIds = new List<string>();
     }
 
     public interface ISaveStorage
@@ -196,7 +203,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 9;
+        public const int CurrentSaveVersion = 10;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -294,7 +301,12 @@ namespace Game.Save
                 },
                 DiscoveredAdventureCells = new List<SavedAdventureCell>(),
                 AdventureNodes = new List<SavedAdventureNode>(),
-                DiscoveredSpecialLocations = new List<string>()
+                DiscoveredSpecialLocations = new List<string>(),
+                LocalSocialProfile = new SocialProfile("p_local_me", "Mayor's Valley", 1, 2, 100),
+                CachedFriends = new List<FriendRelationship>(),
+                BlockedPlayerIds = new List<string>(),
+                ClaimedGiftIds = new List<string>(),
+                AppreciatedPlayerIds = new List<string>()
             };
             Save(data);
             return data;
@@ -341,7 +353,6 @@ namespace Game.Save
 
             if (data.Version < 8)
             {
-                // Version 8 migration logic
             }
 
             if (data.Version < 9)
@@ -360,6 +371,15 @@ namespace Game.Save
                 if (data.DiscoveredAdventureCells == null) data.DiscoveredAdventureCells = new List<SavedAdventureCell>();
                 if (data.AdventureNodes == null) data.AdventureNodes = new List<SavedAdventureNode>();
                 if (data.DiscoveredSpecialLocations == null) data.DiscoveredSpecialLocations = new List<string>();
+            }
+
+            if (data.Version < 10)
+            {
+                if (data.LocalSocialProfile == null) data.LocalSocialProfile = new SocialProfile("p_local_me", "Mayor's Valley", 1, 2, 100);
+                if (data.CachedFriends == null) data.CachedFriends = new List<FriendRelationship>();
+                if (data.BlockedPlayerIds == null) data.BlockedPlayerIds = new List<string>();
+                if (data.ClaimedGiftIds == null) data.ClaimedGiftIds = new List<string>();
+                if (data.AppreciatedPlayerIds == null) data.AppreciatedPlayerIds = new List<string>();
             }
 
             data.Version = CurrentSaveVersion;

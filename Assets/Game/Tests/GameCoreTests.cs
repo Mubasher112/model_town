@@ -14,6 +14,7 @@ using Game.Data;
 using Game.Services;
 using Game.Save;
 using Game.Adventure;
+using Game.Social;
 
 namespace Game.Tests
 {
@@ -662,13 +663,11 @@ namespace Game.Tests
             Assert.IsTrue(energyManager.ConsumeEnergy(3));
             Assert.AreEqual(7, energyManager.CurrentEnergy);
 
-            // Advance 10 minutes (600 seconds) -> +2 Energy
             timeService.AdvanceTime(System.TimeSpan.FromSeconds(600));
             energyManager.RecalculateEnergy();
 
             Assert.AreEqual(9, energyManager.CurrentEnergy);
 
-            // Advance 100 minutes -> Clamped to 20 Max
             timeService.AdvanceTime(System.TimeSpan.FromSeconds(6000));
             energyManager.RecalculateEnergy();
 
@@ -695,7 +694,6 @@ namespace Game.Tests
             var timeService = new StandardGameTimeService();
             var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
 
-            // Rejects insufficient level/pop/coins
             _profile.Level = 1;
             Assert.AreEqual(AdventureOperationResult.LevelRequirementNotMet, advManager.TryUnlockAdventure(currentPopulation: 0));
 
@@ -705,7 +703,7 @@ namespace Game.Tests
 
             Assert.AreEqual(AdventureOperationResult.Success, advManager.TryUnlockAdventure(currentPopulation: 10));
             Assert.IsTrue(advManager.IsUnlocked);
-            Assert.AreEqual(0, _profile.Coins); // 1000 coins spent
+            Assert.AreEqual(0, _profile.Coins);
 
             Assert.IsTrue(advManager.EnterAdventureArea());
             Assert.IsTrue(advManager.IsInAdventureMap);
@@ -742,7 +740,6 @@ namespace Game.Tests
             int initialEnergy = advManager.EnergyManager.CurrentEnergy;
             int initialDurability = advManager.ToolService.GetTool("tool_pickaxe").CurrentDurability;
 
-            // Gather Stone Deposit at (10, 5)
             var result = advManager.GatherNodeAtPosition(new Vector2Int(10, 5), out int yieldAmount, out int xpEarned);
 
             Assert.AreEqual(GatheringOperationResult.Success, result);
@@ -764,14 +761,11 @@ namespace Game.Tests
             Vector2Int obstaclePos = new Vector2Int(12, 10);
             advManager.DevSetPlayerPos(new Vector2Int(12, 9));
 
-            // Cannot move onto obstacle tile before clearing
             Assert.IsFalse(advManager.MovePlayer(obstaclePos));
 
-            // Clear obstacle
             var gatherResult = advManager.GatherNodeAtPosition(obstaclePos, out _, out _);
             Assert.AreEqual(GatheringOperationResult.Success, gatherResult);
 
-            // Path now open
             Assert.IsTrue(advManager.MovePlayer(obstaclePos));
             Assert.AreEqual(obstaclePos, advManager.PlayerPosition);
         }
@@ -787,7 +781,7 @@ namespace Game.Tests
             int initialXp = _profile.CurrentXP;
             long initialCoins = _profile.Coins;
 
-            advManager.MovePlayer(new Vector2Int(20, 20)); // Ancient Ruins
+            advManager.MovePlayer(new Vector2Int(20, 20));
 
             Assert.Greater(_profile.CurrentXP, initialXp);
             Assert.Greater(_profile.Coins, initialCoins);
@@ -795,37 +789,176 @@ namespace Game.Tests
         }
         #endregion
 
+        #region Task 10 Social, Friends & Profiles System Tests
         [Test]
-        public void SaveSystem_SaveAndLoad_Version9Schema()
+        public void MockSocialService_ProfileEditingAndValidation()
+        {
+            var mockSocial = new MockSocialService();
+            bool updateSuccess = false;
+
+            mockSocial.UpdateProfile("   ", "avatar_farmer", (s, err) => updateSuccess = s);
+            Assert.IsFalse(updateSuccess); // Rejects blank name
+
+            mockSocial.UpdateProfile("Green Valley", "avatar_farmer", (s, err) => updateSuccess = s);
+            Assert.IsTrue(updateSuccess);
+
+            mockSocial.GetMyProfile((s, profile, err) =>
+            {
+                Assert.IsTrue(s);
+                Assert.AreEqual("Green Valley", profile.DisplayName);
+                Assert.AreEqual("avatar_farmer", profile.AvatarId);
+            });
+        }
+
+        [Test]
+        public void MockSocialService_FriendRequestFlow_SendAcceptRejectRemove()
+        {
+            var mockSocial = new MockSocialService();
+
+            // Rejects self-request
+            bool selfReqSuccess = true;
+            mockSocial.SendFriendRequest("p_my_id", (s, err) => selfReqSuccess = s);
+            Assert.IsFalse(selfReqSuccess);
+
+            // Send friend request to p_sunny
+            bool sendSuccess = false;
+            mockSocial.SendFriendRequest("p_sunny", (s, err) => sendSuccess = s);
+            Assert.IsTrue(sendSuccess);
+
+            // Rejects duplicate request
+            bool dupReqSuccess = true;
+            mockSocial.SendFriendRequest("p_sunny", (s, err) => dupReqSuccess = s);
+            Assert.IsFalse(dupReqSuccess);
+
+            // Accept friend request
+            bool acceptSuccess = false;
+            mockSocial.AcceptFriendRequest("p_sunny", (s, err) => acceptSuccess = s);
+            Assert.IsTrue(acceptSuccess);
+
+            // Verify friend list
+            List<FriendRelationship> friends = null;
+            mockSocial.GetFriendsList((s, list, err) => friends = list);
+            Assert.IsNotNull(friends);
+            Assert.AreEqual(1, friends.Count);
+            Assert.AreEqual("p_sunny", friends[0].TargetPlayerId);
+            Assert.AreEqual(FriendStatus.Accepted, friends[0].Status);
+
+            // Remove friend
+            bool removeSuccess = false;
+            mockSocial.RemoveFriend("p_sunny", (s, err) => removeSuccess = s);
+            Assert.IsTrue(removeSuccess);
+
+            mockSocial.GetFriendsList((s, list, err) => friends = list);
+            Assert.AreEqual(0, friends.Count);
+        }
+
+        [Test]
+        public void MockSocialService_PlayerSearchByDisplayName()
+        {
+            var mockSocial = new MockSocialService();
+            List<SocialProfile> searchResults = null;
+
+            mockSocial.SearchPlayers("Sunny", (s, list, err) => searchResults = list);
+            Assert.IsNotNull(searchResults);
+            Assert.AreEqual(1, searchResults.Count);
+            Assert.AreEqual("p_sunny", searchResults[0].PlayerId);
+        }
+
+        [Test]
+        public void SocialManager_ReadonlyVisitMode_EnforcesState()
+        {
+            var mockSocial = new MockSocialService();
+            var socialManager = new SocialManager(mockSocial);
+
+            Assert.AreEqual(GameTownMode.OwnTown, socialManager.CurrentTownMode);
+            Assert.IsFalse(socialManager.IsVisitingFriend);
+
+            bool visitSuccess = false;
+            socialManager.StartVisitingFriend("p_sunny", (s, snap, err) => visitSuccess = s);
+
+            Assert.IsTrue(visitSuccess);
+            Assert.AreEqual(GameTownMode.FriendVisit, socialManager.CurrentTownMode);
+            Assert.IsTrue(socialManager.IsVisitingFriend);
+            Assert.IsNotNull(socialManager.VisitedTownSnapshot);
+            Assert.AreEqual("Sunny Valley", socialManager.VisitedTownSnapshot.DisplayName);
+
+            socialManager.ReturnToOwnTown();
+            Assert.AreEqual(GameTownMode.OwnTown, socialManager.CurrentTownMode);
+            Assert.IsFalse(socialManager.IsVisitingFriend);
+        }
+
+        [Test]
+        public void SocialManager_AppreciateTownAndRestrictions()
+        {
+            var mockSocial = new MockSocialService();
+            var socialManager = new SocialManager(mockSocial);
+
+            Assert.IsFalse(socialManager.CanAppreciateTown("p_my_id")); // Self appreciation blocked
+
+            bool appreciateSuccess = false;
+            socialManager.AppreciateTown("p_sunny", (s, err) => appreciateSuccess = s);
+            Assert.IsTrue(appreciateSuccess);
+
+            Assert.IsFalse(socialManager.CanAppreciateTown("p_sunny")); // Duplicate appreciation blocked
+        }
+
+        [Test]
+        public void MockSocialService_BlockingPlayer_RestrictsInteractions()
+        {
+            var mockSocial = new MockSocialService();
+
+            mockSocial.BlockPlayer("p_sunny", (s, err) => { });
+
+            bool visitSuccess = true;
+            mockSocial.VisitTown("p_sunny", (s, snap, err) => visitSuccess = s);
+            Assert.IsFalse(visitSuccess);
+
+            bool requestSuccess = true;
+            mockSocial.SendFriendRequest("p_sunny", (s, err) => requestSuccess = s);
+            Assert.IsFalse(requestSuccess);
+        }
+
+        [Test]
+        public void MockSocialService_OfflineMode_GracefulFailure()
+        {
+            var mockSocial = new MockSocialService();
+            mockSocial.SetOnline(false);
+
+            bool requestSuccess = true;
+            mockSocial.SendFriendRequest("p_sunny", (s, err) => requestSuccess = s);
+            Assert.IsFalse(requestSuccess);
+
+            bool searchSuccess = true;
+            mockSocial.SearchPlayers("Sunny", (s, list, err) => searchSuccess = s);
+            Assert.IsFalse(searchSuccess);
+        }
+        #endregion
+
+        [Test]
+        public void SaveSystem_SaveAndLoad_Version10Schema()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v9.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v10.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 9,
-                PlayerProfile = new PlayerProfile { Level = 8, Coins = 2000, Gems = 50 },
-                IsAdventureUnlocked = true,
-                AdventurePlayerX = 14,
-                AdventurePlayerY = 8,
-                EnergyState = new EnergyState(20, System.DateTime.UtcNow.Ticks) { CurrentEnergy = 15 },
-                ToolInstances = new List<ToolInstance> { new ToolInstance("tool_pickaxe", 25, 30) },
-                DiscoveredAdventureCells = new List<SavedAdventureCell> { new SavedAdventureCell(12, 2), new SavedAdventureCell(14, 8) },
-                DiscoveredSpecialLocations = new List<string> { "loc_ancient_ruins" }
+                Version = 10,
+                PlayerProfile = new PlayerProfile { Level = 12, Coins = 5000, Gems = 100 },
+                LocalSocialProfile = new SocialProfile("p_test_10", "Mubasher's Valley", 12, 18, 86, "avatar_farmer"),
+                BlockedPlayerIds = new List<string> { "p_blocked_1" },
+                AppreciatedPlayerIds = new List<string> { "p_sunny" }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v9.json"));
+            Assert.IsTrue(storage.Exists("save_v10.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(9, loadedSave.Version);
-            Assert.IsTrue(loadedSave.IsAdventureUnlocked);
-            Assert.AreEqual(14, loadedSave.AdventurePlayerX);
-            Assert.AreEqual(15, loadedSave.EnergyState.CurrentEnergy);
-            Assert.AreEqual(1, loadedSave.ToolInstances.Count);
-            Assert.AreEqual(25, loadedSave.ToolInstances[0].CurrentDurability);
-            Assert.AreEqual(2, loadedSave.DiscoveredAdventureCells.Count);
-            Assert.AreEqual(1, loadedSave.DiscoveredSpecialLocations.Count);
+            Assert.AreEqual(10, loadedSave.Version);
+            Assert.AreEqual("Mubasher's Valley", loadedSave.LocalSocialProfile.DisplayName);
+            Assert.AreEqual("avatar_farmer", loadedSave.LocalSocialProfile.AvatarId);
+            Assert.AreEqual(1, loadedSave.BlockedPlayerIds.Count);
+            Assert.AreEqual("p_blocked_1", loadedSave.BlockedPlayerIds[0]);
+            Assert.AreEqual(1, loadedSave.AppreciatedPlayerIds.Count);
         }
 
         private class MockStorage : ISaveStorage

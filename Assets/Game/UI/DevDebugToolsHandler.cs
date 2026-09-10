@@ -9,6 +9,8 @@ using Game.Inventory;
 using Game.Economy;
 using Game.Save;
 using Game.Adventure;
+using Game.Social;
+using Game.Services;
 
 namespace Game.UI
 {
@@ -27,6 +29,8 @@ namespace Game.UI
         private PopulationManager _populationManager;
         private BuildingAccessibilityService _accessibilityService;
         private AdventureManager _adventureManager;
+        private SocialManager _socialManager;
+        private ISocialService _socialService;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -45,7 +49,9 @@ namespace Game.UI
             OrderManager orderManager = null,
             PopulationManager populationManager = null,
             BuildingAccessibilityService accessibilityService = null,
-            AdventureManager adventureManager = null)
+            AdventureManager adventureManager = null,
+            SocialManager socialManager = null,
+            ISocialService socialService = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -61,7 +67,20 @@ namespace Game.UI
             _populationManager = populationManager;
             _accessibilityService = accessibilityService;
             _adventureManager = adventureManager;
+            _socialManager = socialManager;
+            _socialService = socialService;
         }
+
+        public void DevSimulateSocialOffline() => _socialService?.SetOnline(false);
+        public void DevSimulateSocialOnline() => _socialService?.SetOnline(true);
+        public void DevSendMockFriendRequest() => _socialService?.SendFriendRequest("p_sunny", (s, err) => { });
+        public void DevAcceptAllFriendRequests()
+        {
+            _socialService?.AcceptFriendRequest("p_sunny", (s, err) => { });
+            _socialService?.AcceptFriendRequest("p_green", (s, err) => { });
+        }
+        public void DevVisitMockTown() => _socialManager?.StartVisitingFriend("p_sunny", (s, snap, err) => { });
+        public void DevReturnFromVisit() => _socialManager?.ReturnToOwnTown();
 
         public void DevUnlockAdventure() => _adventureManager?.DevUnlockAdventure();
         public void DevRevealAdventureMap() => _adventureManager?.DevRevealAllMap();
