@@ -30,6 +30,7 @@ namespace Game.Core
         public ObjectPlacementManager PlacementManager { get; private set; }
         public RoadManager RoadManager { get; private set; }
         public LandExpansionManager ExpansionManager { get; private set; }
+        public BuildingAccessibilityService AccessibilityService { get; private set; }
         public StandardGameTimeService TimeService { get; private set; }
         public FarmManager FarmManager { get; private set; }
         public BuildingManager BuildingManager { get; private set; }
@@ -49,9 +50,10 @@ namespace Game.Core
         [SerializeField] private ProductionUIController productionUIController;
         [SerializeField] private OrdersUIController ordersUIController;
         [SerializeField] private TownOverviewUIController townOverviewUIController;
+        [SerializeField] private LandExpansionUIController expansionUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v7.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v8.json");
 
         private void Awake()
         {
@@ -117,9 +119,14 @@ namespace Game.Core
                 townOverviewUIController.Initialize(PopulationManager, PlayerProfile, BuildingManager);
             }
 
+            if (expansionUIController != null)
+            {
+                expansionUIController.Initialize(ExpansionManager, EconomyManager, PlayerProfile, PopulationManager);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager, PopulationManager);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager, PopulationManager, AccessibilityService);
             }
 
             if (cameraController != null)
@@ -132,6 +139,19 @@ namespace Game.Core
         {
             if (tile == null) return;
 
+            if (tile.IsLocked)
+            {
+                var zone = ExpansionManager.GetZoneAt(gridPos);
+                if (zone != null && expansionUIController != null)
+                {
+                    expansionUIController.OnLockedLandSelected(zone);
+                    if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
+                    if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+                    if (productionUIController != null) productionUIController.ClosePanel();
+                    return;
+                }
+            }
+
             if (tile.IsOccupied && !string.IsNullOrEmpty(tile.OccupyingObjectId))
             {
                 // Check if it's a field
@@ -143,6 +163,7 @@ namespace Game.Core
                         if (farmingUIController != null) farmingUIController.OnFieldSelected(field);
                         if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
                         if (productionUIController != null) productionUIController.ClosePanel();
+                        if (expansionUIController != null) expansionUIController.ClosePanel();
                         return;
                     }
                 }
@@ -162,6 +183,7 @@ namespace Game.Core
                                 productionUIController.OnProductionBuildingSelected(prodBuilding);
                                 if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
                                 if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
+                                if (expansionUIController != null) expansionUIController.ClosePanel();
                                 return;
                             }
                         }
@@ -169,6 +191,7 @@ namespace Game.Core
                         if (buildingInfoUIController != null) buildingInfoUIController.OnBuildingSelected(b);
                         if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
                         if (productionUIController != null) productionUIController.ClosePanel();
+                        if (expansionUIController != null) expansionUIController.ClosePanel();
                         return;
                     }
                 }
@@ -177,6 +200,7 @@ namespace Game.Core
             if (farmingUIController != null) farmingUIController.OnFieldSelected(null);
             if (buildingInfoUIController != null) buildingInfoUIController.ClosePanel();
             if (productionUIController != null) productionUIController.ClosePanel();
+            if (expansionUIController != null) expansionUIController.ClosePanel();
         }
 
         private void Update()
@@ -387,8 +411,9 @@ namespace Game.Core
             PlacementManager = new ObjectPlacementManager(WorldGrid);
             RoadManager = new RoadManager(WorldGrid);
             ExpansionManager = new LandExpansionManager(WorldGrid);
-            FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
             BuildingManager = new BuildingManager(PlacementManager, EconomyManager, InventoryManager, PlayerProfile, TimeService);
+            AccessibilityService = new BuildingAccessibilityService(BuildingManager, RoadManager);
+            FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
             ProductionManager = new ProductionManager(InventoryManager, PlayerProfile, TimeService);
             OrderManager = new OrderManager(InventoryManager, EconomyManager, PlayerProfile, TimeService);
             PopulationManager = new PopulationManager(BuildingManager, PlayerProfile, TimeService, HappinessManager);
@@ -562,6 +587,7 @@ namespace Game.Core
             }
 
             PopulationManager.RecalculatePopulationAndAssignments();
+            AccessibilityService.RecalculateAllBuildingAccessibility();
         }
 
         private void OnDestroy()

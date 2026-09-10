@@ -11,7 +11,8 @@ namespace Game.Data
         Storage,
         Community,
         Decoration,
-        Production
+        Production,
+        Roads
     }
 
     public enum OrderType
@@ -168,6 +169,7 @@ namespace Game.Data
         public int PopulationCapacity = 0;
         public int StorageCapacityBonus = 0;
         public int HappinessBonus = 0;
+        public bool RequiresRoadAccess = true;
         public int MaxUpgradeLevel = 2;
 
         public long UpgradeCostCoins = 200;
@@ -190,7 +192,8 @@ namespace Game.Data
             int xpReward = 10,
             int populationCapacity = 0,
             int storageCapacityBonus = 0,
-            int happinessBonus = 0)
+            int happinessBonus = 0,
+            bool requiresRoadAccess = true)
         {
             BuildingId = buildingId;
             Name = name;
@@ -205,6 +208,7 @@ namespace Game.Data
             PopulationCapacity = populationCapacity;
             StorageCapacityBonus = storageCapacityBonus;
             HappinessBonus = happinessBonus;
+            RequiresRoadAccess = requiresRoadAccess;
         }
     }
 
@@ -214,47 +218,47 @@ namespace Game.Data
         {
             {
                 "small_house",
-                new BuildingConfig("small_house", "Small House", "Increases town population capacity.", BuildingCategory.Residential, 2, 2, 100, 15f, unlockLevel: 1, xpReward: 15, populationCapacity: 2)
+                new BuildingConfig("small_house", "Small House", "Increases town population capacity.", BuildingCategory.Residential, 2, 2, 100, 15f, unlockLevel: 1, xpReward: 15, populationCapacity: 2, requiresRoadAccess: true)
             },
             {
                 "family_house",
-                new BuildingConfig("family_house", "Family House", "Provides higher population capacity for growing towns.", BuildingCategory.Residential, 3, 2, 300, 45f, unlockLevel: 2, xpReward: 35, populationCapacity: 4)
+                new BuildingConfig("family_house", "Family House", "Provides higher population capacity for growing towns.", BuildingCategory.Residential, 3, 2, 300, 45f, unlockLevel: 2, xpReward: 35, populationCapacity: 4, requiresRoadAccess: true)
             },
             {
                 "barn",
-                new BuildingConfig("barn", "Barn", "Increases inventory storage capacity.", BuildingCategory.Storage, 3, 3, 250, 30f, unlockLevel: 1, xpReward: 25, storageCapacityBonus: 20)
+                new BuildingConfig("barn", "Barn", "Increases inventory storage capacity.", BuildingCategory.Storage, 3, 3, 250, 30f, unlockLevel: 1, xpReward: 25, storageCapacityBonus: 20, requiresRoadAccess: true)
             },
             {
                 "town_hall",
-                new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50, happinessBonus: 10)
+                new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50, happinessBonus: 10, requiresRoadAccess: true)
             },
             {
                 "feed_mill",
-                new BuildingConfig("feed_mill", "Feed Mill", "Converts crops into animal feed.", BuildingCategory.Production, 3, 3, 150, 20f, unlockLevel: 1, xpReward: 20)
+                new BuildingConfig("feed_mill", "Feed Mill", "Converts crops into animal feed.", BuildingCategory.Production, 3, 3, 150, 20f, unlockLevel: 1, xpReward: 20, requiresRoadAccess: true)
             },
             {
                 "bakery",
-                new BuildingConfig("bakery", "Bakery", "Bakes fresh flour and bread from crops.", BuildingCategory.Production, 3, 3, 200, 30f, unlockLevel: 2, xpReward: 25)
+                new BuildingConfig("bakery", "Bakery", "Bakes fresh flour and bread from crops.", BuildingCategory.Production, 3, 3, 200, 30f, unlockLevel: 2, xpReward: 25, requiresRoadAccess: true)
             },
             {
                 "sugar_mill",
-                new BuildingConfig("sugar_mill", "Sugar Mill", "Processes sugarcane into sugar.", BuildingCategory.Production, 3, 3, 300, 40f, unlockLevel: 3, xpReward: 30)
+                new BuildingConfig("sugar_mill", "Sugar Mill", "Processes sugarcane into sugar.", BuildingCategory.Production, 3, 3, 300, 40f, unlockLevel: 3, xpReward: 30, requiresRoadAccess: true)
             },
             {
                 "dairy_factory",
-                new BuildingConfig("dairy_factory", "Dairy Factory", "Produces fresh milk using animal feed.", BuildingCategory.Production, 3, 3, 400, 50f, unlockLevel: 4, xpReward: 40)
+                new BuildingConfig("dairy_factory", "Dairy Factory", "Produces fresh milk using animal feed.", BuildingCategory.Production, 3, 3, 400, 50f, unlockLevel: 4, xpReward: 40, requiresRoadAccess: true)
             },
             {
                 "tree",
-                new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2, happinessBonus: 2)
+                new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2, happinessBonus: 2, requiresRoadAccess: false)
             },
             {
                 "flower_bed",
-                new BuildingConfig("flower_bed", "Flower Bed", "Colorful flower bed decoration.", BuildingCategory.Decoration, 1, 1, 30, 0f, unlockLevel: 1, xpReward: 3, happinessBonus: 3)
+                new BuildingConfig("flower_bed", "Flower Bed", "Colorful flower bed decoration.", BuildingCategory.Decoration, 1, 1, 30, 0f, unlockLevel: 1, xpReward: 3, happinessBonus: 3, requiresRoadAccess: false)
             },
             {
                 "small_fountain",
-                new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15, happinessBonus: 5)
+                new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15, happinessBonus: 5, requiresRoadAccess: false)
             }
         };
 

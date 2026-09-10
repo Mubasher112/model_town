@@ -181,8 +181,97 @@ namespace Game.Tests
             Vector2Int northZoneCoord = new Vector2Int(10, 26);
             Assert.IsTrue(grid.GetTile(northZoneCoord).IsLocked);
 
-            Assert.IsTrue(expansionManager.UnlockZone("zone_north"));
+            Assert.IsTrue(expansionManager.UnlockZone("expansion_01"));
             Assert.IsFalse(grid.GetTile(northZoneCoord).IsLocked);
+        }
+        #endregion
+
+        #region Land Expansion, Roads & Accessibility System Tests
+        [Test]
+        public void LandExpansion_TryPurchaseExpansion_ValidatesRequirementsAndDeductsCoins()
+        {
+            var grid = new WorldGrid(30, 30);
+            var expansionManager = new LandExpansionManager(grid);
+
+            _profile.Level = 5;
+            _profile.Coins = 1000;
+
+            // Purchase expansion_01 (500 coins, Level 5)
+            var result = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
+
+            Assert.AreEqual(ExpansionOperationResult.Success, result);
+            Assert.AreEqual(500, _profile.Coins); // 500 coins deducted
+            Assert.IsFalse(grid.GetTile(new Vector2Int(10, 26)).IsLocked);
+
+            // Cannot purchase twice
+            var duplicateResult = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
+            Assert.AreEqual(ExpansionOperationResult.AlreadyUnlocked, duplicateResult);
+        }
+
+        [Test]
+        public void LandExpansion_TryPurchaseExpansion_RejectsInsufficientCoinsOrLevel()
+        {
+            var grid = new WorldGrid(30, 30);
+            var expansionManager = new LandExpansionManager(grid);
+
+            _profile.Level = 1; // Insufficient level for expansion_01 (Level 5)
+            _profile.Coins = 1000;
+
+            var result = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
+            Assert.AreEqual(ExpansionOperationResult.LevelRequirementNotMet, result);
+            Assert.AreEqual(1000, _profile.Coins); // Coins untouched
+        }
+
+        [Test]
+        public void RoadManager_AutoConnectivityTypes()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var roadManager = new RoadManager(grid);
+
+            Vector2Int center = new Vector2Int(10, 10);
+            roadManager.PlaceRoad(center);
+
+            Assert.AreEqual(RoadConnectionType.Isolated, roadManager.GetRoadConnectionType(center));
+
+            roadManager.PlaceRoad(center + new Vector2Int(0, 1)); // North
+            Assert.AreEqual(RoadConnectionType.DeadEnd, roadManager.GetRoadConnectionType(center));
+
+            roadManager.PlaceRoad(center + new Vector2Int(0, -1)); // South
+            Assert.AreEqual(RoadConnectionType.Straight, roadManager.GetRoadConnectionType(center));
+
+            roadManager.PlaceRoad(center + new Vector2Int(1, 0)); // East
+            Assert.AreEqual(RoadConnectionType.TJunction, roadManager.GetRoadConnectionType(center));
+
+            roadManager.PlaceRoad(center + new Vector2Int(-1, 0)); // West
+            Assert.AreEqual(RoadConnectionType.Cross, roadManager.GetRoadConnectionType(center));
+        }
+
+        [Test]
+        public void BuildingAccessibilityService_UpdatesOnRoadChanges()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var roadManager = new RoadManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+            var accessibilityService = new BuildingAccessibilityService(buildingManager, roadManager);
+
+            // Place Small House at (10, 10) (2x2 footprint)
+            buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var house);
+            buildingManager.DevInstantCompleteConstruction(house.InstanceId);
+
+            // No adjacent road -> Inaccessible
+            Assert.IsFalse(accessibilityService.IsBuildingAccessible(house));
+
+            // Place road at (10, 9) adjacent to south edge
+            roadManager.PlaceRoad(new Vector2Int(10, 9));
+            Assert.IsTrue(accessibilityService.IsBuildingAccessible(house));
+
+            // Remove road -> Inaccessible again
+            roadManager.RemoveRoad(new Vector2Int(10, 9));
+            Assert.IsFalse(accessibilityService.IsBuildingAccessible(house));
         }
         #endregion
 
@@ -657,7 +746,6 @@ namespace Game.Tests
             var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
             var popManager = new PopulationManager(buildingManager, _profile, timeService);
 
-            // House 1: Under construction -> 0 capacity contribution
             buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var h1);
             popManager.RecalculatePopulationAndAssignments();
 
@@ -665,7 +753,6 @@ namespace Game.Tests
             Assert.AreEqual(0, stats1.TotalHousingCapacity);
             Assert.AreEqual(0, stats1.CurrentPopulation);
 
-            // House 1 completed -> Capacity 2, auto-spawns 2 residents
             buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
             var stats2 = popManager.GetPopulationStats();
 
@@ -683,7 +770,6 @@ namespace Game.Tests
             var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
             var popManager = new PopulationManager(buildingManager, _profile, timeService);
 
-            // Build House 1 (Cap 2) and House 2 (Cap 2)
             buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var h1);
             buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
             buildingManager.StartConstruction("small_house", new Vector2Int(15, 10), RotationAngle.Deg0, out var h2);
@@ -693,12 +779,11 @@ namespace Game.Tests
             Assert.AreEqual(4, stats1.TotalHousingCapacity);
             Assert.AreEqual(4, stats1.CurrentPopulation);
 
-            // Remove House 1 -> Capacity becomes 2. 2 residents stay housed, 2 become unassigned
             buildingManager.RemoveBuilding(h1.InstanceId);
             var stats2 = popManager.GetPopulationStats();
 
             Assert.AreEqual(2, stats2.TotalHousingCapacity);
-            Assert.AreEqual(4, stats2.CurrentPopulation); // Residents NOT deleted!
+            Assert.AreEqual(4, stats2.CurrentPopulation);
             Assert.AreEqual(2, stats2.UnassignedResidentsCount);
         }
 
@@ -712,20 +797,16 @@ namespace Game.Tests
             var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
             var happinessManager = new HappinessManager();
 
-            // Build Town Hall (+10 happiness bonus)
             buildingManager.StartConstruction("town_hall", new Vector2Int(10, 10), RotationAngle.Deg0, out var th);
             buildingManager.DevInstantCompleteConstruction(th.InstanceId);
 
             happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 4, totalHousingCapacity: 4);
 
-            // Base 50 + 10 = 60 ("Good")
             Assert.AreEqual(60, happinessManager.CurrentHappinessScore);
             Assert.AreEqual("Good", happinessManager.HappinessRating);
 
-            // Add Housing Shortage penalty (6 pop, 2 housing capacity -> 4 unhoused = -40 penalty)
             happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 6, totalHousingCapacity: 2);
 
-            // Base 50 + 10 - 40 = 20 ("Low")
             Assert.AreEqual(20, happinessManager.CurrentHappinessScore);
             Assert.AreEqual("Low", happinessManager.HappinessRating);
         }
@@ -735,13 +816,13 @@ namespace Game.Tests
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v7.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v8.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 7,
+                Version = 8,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
-                UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
+                UnlockedZoneIds = new List<string> { "zone_start", "expansion_01" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
                 PlacedObjects = new List<SavedPlacedObject>
                 {
@@ -783,10 +864,10 @@ namespace Game.Tests
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v7.json"));
+            Assert.IsTrue(storage.Exists("save_v8.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(7, loadedSave.Version);
+            Assert.AreEqual(8, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);

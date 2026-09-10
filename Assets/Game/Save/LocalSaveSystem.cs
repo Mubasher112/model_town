@@ -127,7 +127,7 @@ namespace Game.Save
     [Serializable]
     public class SaveData
     {
-        public int Version = 7;
+        public int Version = 8;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -154,7 +154,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 7;
+        public const int CurrentSaveVersion = 8;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Game.Data;
 using Game.Buildings;
+using Game.World;
 
 namespace Game.Residents
 {
@@ -57,7 +58,8 @@ namespace Game.Residents
         public void RecalculateHappiness(
             List<BuildingInstance> buildings,
             int currentPopulation,
-            int totalHousingCapacity)
+            int totalHousingCapacity,
+            int inaccessibleBuildingCount = 0)
         {
             _modifiers.Clear();
 
@@ -87,6 +89,12 @@ namespace Game.Residents
             {
                 int penalty = unhousedCount * 10;
                 _modifiers.Add(new HappinessModifier("housing_shortage", $"Housing Shortage ({unhousedCount} unhoused)", -penalty));
+            }
+
+            if (inaccessibleBuildingCount > 0)
+            {
+                int roadAccessPenalty = inaccessibleBuildingCount * 5;
+                _modifiers.Add(new HappinessModifier("road_access_penalty", $"Inaccessible Buildings ({inaccessibleBuildingCount})", -roadAccessPenalty));
             }
 
             int score = BaseHappinessScore;
@@ -133,5 +141,9 @@ namespace Game.Residents
         public int UnassignedResidentsCount;
         public int HappinessScore;
         public string HappinessRating;
+        public int TotalLandTiles;
+        public int TotalRoadTiles;
+        public int AccessibleBuildingsCount;
+        public int InaccessibleBuildingsCount;
     }
 }

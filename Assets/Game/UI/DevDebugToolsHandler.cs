@@ -24,6 +24,7 @@ namespace Game.UI
         private ProductionManager _productionManager;
         private OrderManager _orderManager;
         private PopulationManager _populationManager;
+        private BuildingAccessibilityService _accessibilityService;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -40,7 +41,8 @@ namespace Game.UI
             EconomyManager economyManager = null,
             ProductionManager productionManager = null,
             OrderManager orderManager = null,
-            PopulationManager populationManager = null)
+            PopulationManager populationManager = null,
+            BuildingAccessibilityService accessibilityService = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -54,6 +56,7 @@ namespace Game.UI
             _productionManager = productionManager;
             _orderManager = orderManager;
             _populationManager = populationManager;
+            _accessibilityService = accessibilityService;
         }
 
         public void ToggleDevMenu()
@@ -119,6 +122,7 @@ namespace Game.UI
         public void DevRecalculatePopulationAndHappiness()
         {
             _populationManager?.RecalculatePopulationAndAssignments();
+            _accessibilityService?.RecalculateAllBuildingAccessibility();
         }
 
         public void DevSetHappinessScore(int score)
