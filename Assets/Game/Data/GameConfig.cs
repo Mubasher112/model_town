@@ -14,6 +14,131 @@ namespace Game.Data
         Production
     }
 
+    public enum OrderType
+    {
+        Customer,
+        Town,
+        Delivery
+    }
+
+    [Serializable]
+    public class CustomerConfig
+    {
+        public string CustomerId;
+        public string Name;
+        public string Title;
+
+        public CustomerConfig() { }
+
+        public CustomerConfig(string customerId, string name, string title)
+        {
+            CustomerId = customerId;
+            Name = name;
+            Title = title;
+        }
+    }
+
+    public static class CustomerLibrary
+    {
+        private static readonly List<CustomerConfig> _customers = new List<CustomerConfig>
+        {
+            new CustomerConfig("cust_emma", "Emma", "Farmer"),
+            new CustomerConfig("cust_john", "John", "Baker"),
+            new CustomerConfig("cust_maya", "Maya", "Shopkeeper"),
+            new CustomerConfig("cust_bob", "Bob", "Builder"),
+            new CustomerConfig("cust_alex", "Alex", "Resident")
+        };
+
+        public static CustomerConfig GetRandomCustomer()
+        {
+            var rand = new Random();
+            int idx = rand.Next(_customers.Count);
+            return _customers[idx];
+        }
+
+        public static CustomerConfig GetCustomer(string customerId)
+        {
+            foreach (var c in _customers)
+            {
+                if (c.CustomerId == customerId) return c;
+            }
+            return _customers[0];
+        }
+    }
+
+    [Serializable]
+    public class OrderRequirement
+    {
+        public string ItemId;
+        public int Quantity;
+
+        public OrderRequirement() { }
+
+        public OrderRequirement(string itemId, int quantity)
+        {
+            ItemId = itemId;
+            Quantity = quantity;
+        }
+    }
+
+    [Serializable]
+    public class OrderReward
+    {
+        public long Coins;
+        public int Xp;
+
+        public OrderReward() { }
+
+        public OrderReward(long coins, int xp)
+        {
+            Coins = coins;
+            Xp = xp;
+        }
+    }
+
+    [Serializable]
+    public class OrderTemplateConfig
+    {
+        public string TemplateId;
+        public OrderType Type = OrderType.Customer;
+        public int MinLevel = 1;
+        public List<OrderRequirement> Requirements = new List<OrderRequirement>();
+        public OrderReward Reward = new OrderReward();
+
+        public OrderTemplateConfig() { }
+
+        public OrderTemplateConfig(string templateId, OrderType type, int minLevel, List<OrderRequirement> reqs, OrderReward reward)
+        {
+            TemplateId = templateId;
+            Type = type;
+            MinLevel = minLevel;
+            Requirements = reqs ?? new List<OrderRequirement>();
+            Reward = reward ?? new OrderReward();
+        }
+    }
+
+    public static class OrderTemplateLibrary
+    {
+        private static readonly List<OrderTemplateConfig> _templates = new List<OrderTemplateConfig>
+        {
+            new OrderTemplateConfig("order_wheat_basic", OrderType.Customer, 1, new List<OrderRequirement> { new OrderRequirement("crop_wheat", 3) }, new OrderReward(30, 5)),
+            new OrderTemplateConfig("order_flour_basic", OrderType.Customer, 1, new List<OrderRequirement> { new OrderRequirement("item_flour", 2) }, new OrderReward(60, 10)),
+            new OrderTemplateConfig("order_bread_basic", OrderType.Customer, 2, new List<OrderRequirement> { new OrderRequirement("item_bread", 2) }, new OrderReward(100, 20)),
+            new OrderTemplateConfig("order_feed_basic", OrderType.Customer, 1, new List<OrderRequirement> { new OrderRequirement("item_animal_feed", 2) }, new OrderReward(80, 15)),
+            new OrderTemplateConfig("order_sugar_bread", OrderType.Customer, 2, new List<OrderRequirement> { new OrderRequirement("item_sugar", 1), new OrderRequirement("item_bread", 1) }, new OrderReward(130, 25))
+        };
+
+        public static List<OrderTemplateConfig> GetTemplatesForLevel(int level)
+        {
+            var list = new List<OrderTemplateConfig>();
+            foreach (var t in _templates)
+            {
+                if (t.MinLevel <= level) list.Add(t);
+            }
+            return list;
+        }
+    }
+
     [Serializable]
     public class ItemConfig
     {
@@ -44,7 +169,6 @@ namespace Game.Data
         public int StorageCapacityBonus = 0;
         public int MaxUpgradeLevel = 2;
 
-        // Upgrade config
         public long UpgradeCostCoins = 200;
         public float UpgradeTimeSeconds = 30f;
         public int UpgradePopulationBonus = 5;

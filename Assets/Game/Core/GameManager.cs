@@ -8,6 +8,7 @@ using Game.World;
 using Game.Farming;
 using Game.Buildings;
 using Game.Production;
+using Game.Orders;
 using Game.Data;
 using Game.Save;
 using Game.Platforms;
@@ -32,6 +33,7 @@ namespace Game.Core
         public FarmManager FarmManager { get; private set; }
         public BuildingManager BuildingManager { get; private set; }
         public ProductionManager ProductionManager { get; private set; }
+        public OrderManager OrderManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
@@ -42,9 +44,10 @@ namespace Game.Core
         [SerializeField] private BuildMenuUIController buildMenuUIController;
         [SerializeField] private BuildingInfoUIController buildingInfoUIController;
         [SerializeField] private ProductionUIController productionUIController;
+        [SerializeField] private OrdersUIController ordersUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v5.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v6.json");
 
         private void Awake()
         {
@@ -99,9 +102,14 @@ namespace Game.Core
                 productionUIController.Initialize(ProductionManager, BuildingManager, InventoryManager, PlayerProfile);
             }
 
+            if (ordersUIController != null)
+            {
+                ordersUIController.Initialize(OrderManager, InventoryManager, PlayerProfile);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager);
             }
 
             if (cameraController != null)
@@ -181,6 +189,11 @@ namespace Game.Core
             if (ProductionManager != null)
             {
                 ProductionManager.UpdateAllProductionBuildings();
+            }
+
+            if (OrderManager != null)
+            {
+                OrderManager.CheckAndExpireOrders();
             }
         }
 
@@ -282,6 +295,49 @@ namespace Game.Core
                 saveData.ProductionBuildings.Add(spb);
             }
 
+            var activeOrders = OrderManager.GetActiveOrders();
+            foreach (var o in activeOrders)
+            {
+                var so = new SavedOrder
+                {
+                    OrderId = o.OrderId,
+                    CustomerId = o.CustomerId,
+                    Type = (int)o.Type,
+                    RewardCoins = o.Reward.Coins,
+                    RewardXp = o.Reward.Xp,
+                    State = (int)o.State,
+                    CreationUtcTicks = o.CreationUtcTicks,
+                    ExpirationUtcTicks = o.ExpirationUtcTicks
+                };
+
+                if (o.Requirements != null)
+                {
+                    foreach (var req in o.Requirements)
+                    {
+                        so.Requirements.Add(new SavedOrderRequirement
+                        {
+                            ItemId = req.ItemId,
+                            Quantity = req.Quantity
+                        });
+                    }
+                }
+
+                saveData.ActiveOrders.Add(so);
+            }
+
+            var historyEntries = OrderManager.GetOrderHistory();
+            foreach (var h in historyEntries)
+            {
+                saveData.OrderHistory.Add(new SavedOrderHistory
+                {
+                    OrderId = h.OrderId,
+                    CustomerId = h.CustomerId,
+                    CoinsEarned = h.CoinsEarned,
+                    XpEarned = h.XpEarned,
+                    CompletionUtcTicks = h.CompletionUtcTicks
+                });
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -310,6 +366,7 @@ namespace Game.Core
             FarmManager = new FarmManager(InventoryManager, PlayerProfile, TimeService);
             BuildingManager = new BuildingManager(PlacementManager, EconomyManager, InventoryManager, PlayerProfile, TimeService);
             ProductionManager = new ProductionManager(InventoryManager, PlayerProfile, TimeService);
+            OrderManager = new OrderManager(InventoryManager, EconomyManager, PlayerProfile, TimeService);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
@@ -382,7 +439,6 @@ namespace Game.Core
 
                     BuildingManager.RegisterBuilding(bInstance);
 
-                    // If it's a production building, register with ProductionManager
                     if (bConfig != null && bConfig.Category == BuildingCategory.Production)
                     {
                         var prodBuilding = new ProductionBuildingInstance(sb.InstanceId, sb.BuildingId);
@@ -418,6 +474,53 @@ namespace Game.Core
                         }
                     }
                 }
+            }
+
+            if (saveData.ActiveOrders != null && saveData.ActiveOrders.Count > 0)
+            {
+                var loadedActiveOrders = new List<OrderInstance>();
+                foreach (var so in saveData.ActiveOrders)
+                {
+                    var reqs = new List<OrderRequirement>();
+                    if (so.Requirements != null)
+                    {
+                        foreach (var req in so.Requirements)
+                        {
+                            reqs.Add(new OrderRequirement(req.ItemId, req.Quantity));
+                        }
+                    }
+
+                    var orderInst = new OrderInstance(
+                        so.OrderId,
+                        so.CustomerId,
+                        (OrderType)so.Type,
+                        reqs,
+                        new OrderReward(so.RewardCoins, so.RewardXp),
+                        so.CreationUtcTicks
+                    )
+                    {
+                        State = (OrderState)so.State,
+                        ExpirationUtcTicks = so.ExpirationUtcTicks
+                    };
+
+                    loadedActiveOrders.Add(orderInst);
+                }
+
+                OrderManager.LoadActiveOrders(loadedActiveOrders);
+            }
+            else
+            {
+                OrderManager.EnsureMinimumOrders();
+            }
+
+            if (saveData.OrderHistory != null)
+            {
+                var loadedHistory = new List<OrderHistoryEntry>();
+                foreach (var sh in saveData.OrderHistory)
+                {
+                    loadedHistory.Add(new OrderHistoryEntry(sh.OrderId, sh.CustomerId, sh.CoinsEarned, sh.XpEarned, sh.CompletionUtcTicks));
+                }
+                OrderManager.LoadOrderHistory(loadedHistory);
             }
         }
 

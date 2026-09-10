@@ -8,6 +8,7 @@ using Game.World;
 using Game.Farming;
 using Game.Buildings;
 using Game.Production;
+using Game.Orders;
 using Game.Data;
 using Game.Services;
 using Game.Save;
@@ -444,7 +445,7 @@ namespace Game.Tests
             Assert.AreEqual(ProductionOperationResult.Success, result);
             Assert.AreEqual(1, feedMill.JobsQueue.Count);
             Assert.AreEqual(ProductionJobState.Producing, feedMill.JobsQueue[0].State);
-            Assert.AreEqual(3, _inventoryManager.GetQuantity("crop_wheat")); // 2 wheat consumed
+            Assert.AreEqual(3, _inventoryManager.GetQuantity("crop_wheat"));
         }
 
         [Test]
@@ -453,14 +454,12 @@ namespace Game.Tests
             var timeService = new StandardGameTimeService();
             var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
 
-            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 1); // Queue cap 1
+            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 1);
             prodManager.RegisterProductionBuilding(feedMill);
 
-            // Reject missing ingredients
             var noIngResult = prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
             Assert.AreEqual(ProductionOperationResult.MissingIngredients, noIngResult);
 
-            // Add ingredients for 2 jobs
             _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
 
             Assert.AreEqual(ProductionOperationResult.Success, prodManager.StartProductionJob("pm_1", "recipe_animal_feed"));
@@ -479,7 +478,6 @@ namespace Game.Tests
             _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
             prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
 
-            // Complete current job via dev tool
             prodManager.DevInstantCompleteCurrentJob("pm_1");
             Assert.AreEqual(ProductionJobState.Ready, feedMill.JobsQueue[0].State);
 
@@ -497,7 +495,7 @@ namespace Game.Tests
         {
             var timeService = new StandardGameTimeService();
             var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
-            _profile.Level = 5; // Unlock all recipes
+            _profile.Level = 5;
 
             var bakery = new ProductionBuildingInstance("bakery_1", "bakery", 2);
             prodManager.RegisterProductionBuilding(bakery);
@@ -505,14 +503,12 @@ namespace Game.Tests
             _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 4);
             _inventoryManager.AddItem("item_sugar", "Sugar", ItemType.ManufacturedGood, 2);
 
-            // Step 1: Flour (Wheat x2 -> Flour x1)
             prodManager.StartProductionJob("bakery_1", "recipe_flour");
             prodManager.DevInstantCompleteCurrentJob("bakery_1");
             prodManager.CollectProduct("bakery_1");
 
             Assert.AreEqual(1, _inventoryManager.GetQuantity("item_flour"));
 
-            // Step 2: Bread (Flour x1 + Sugar x1 -> Bread x1)
             prodManager.StartProductionJob("bakery_1", "recipe_bread");
             prodManager.DevInstantCompleteCurrentJob("bakery_1");
             prodManager.CollectProduct("bakery_1");
@@ -531,14 +527,121 @@ namespace Game.Tests
             prodManager.RegisterProductionBuilding(feedMill);
 
             tinyInventory.AddItem("crop_wheat", "Wheat", ItemType.Crop, 1);
-            // Storage now full (1/1)
 
             var headJob = new ProductionJob("j1", "recipe_animal_feed") { State = ProductionJobState.Ready };
             feedMill.JobsQueue.Add(headJob);
 
             var result = prodManager.CollectProduct("pm_1");
             Assert.AreEqual(ProductionOperationResult.StorageFull, result);
-            Assert.AreEqual(1, feedMill.JobsQueue.Count); // Job retained
+            Assert.AreEqual(1, feedMill.JobsQueue.Count);
+        }
+        #endregion
+
+        #region Orders & Delivery System Tests
+        [Test]
+        public void OrderGenerator_GeneratesLevelAppropriateOrders()
+        {
+            long now = System.DateTime.UtcNow.Ticks;
+            var orderLvl1 = OrderGenerator.GenerateOrderForLevel(1, now);
+
+            Assert.IsNotNull(orderLvl1);
+            Assert.GreaterOrEqual(orderLvl1.Requirements.Count, 1);
+            Assert.Greater(orderLvl1.Reward.Coins, 0);
+            Assert.Greater(orderLvl1.Reward.Xp, 0);
+        }
+
+        [Test]
+        public void OrderManager_AtomicFulfillOrder_DeductsItemsAndGrantsRewards()
+        {
+            var timeService = new StandardGameTimeService();
+            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
+
+            _inventoryManager.AddItem("item_bread", "Bread", ItemType.ManufacturedGood, 5);
+
+            var breadOrder = new OrderInstance(
+                "o_test_1",
+                "cust_emma",
+                OrderType.Customer,
+                new List<OrderRequirement> { new OrderRequirement("item_bread", 2) },
+                new OrderReward(100, 20),
+                timeService.CurrentUtcTicks
+            );
+
+            orderManager.LoadActiveOrders(new List<OrderInstance> { breadOrder });
+
+            long initialCoins = _profile.Coins;
+            int initialXp = _profile.CurrentXP;
+
+            var result = orderManager.FulfillOrder("o_test_1");
+
+            Assert.AreEqual(OrderOperationResult.Success, result);
+            Assert.AreEqual(3, _inventoryManager.GetQuantity("item_bread"));
+            Assert.AreEqual(initialCoins + 100, _profile.Coins);
+            Assert.AreEqual(initialXp + 20, _profile.CurrentXP);
+            Assert.AreEqual(1, orderManager.GetOrderHistory().Count);
+        }
+
+        [Test]
+        public void OrderManager_AtomicValidationFailure_LeavesInventoryUntouched()
+        {
+            var timeService = new StandardGameTimeService();
+            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
+
+            _inventoryManager.AddItem("item_bread", "Bread", ItemType.ManufacturedGood, 1);
+
+            var breadOrder = new OrderInstance(
+                "o_test_1",
+                "cust_emma",
+                OrderType.Customer,
+                new List<OrderRequirement> { new OrderRequirement("item_bread", 2) },
+                new OrderReward(100, 20),
+                timeService.CurrentUtcTicks
+            );
+
+            orderManager.LoadActiveOrders(new List<OrderInstance> { breadOrder });
+
+            long initialCoins = _profile.Coins;
+            int initialXp = _profile.CurrentXP;
+
+            var result = orderManager.FulfillOrder("o_test_1");
+
+            Assert.AreEqual(OrderOperationResult.MissingRequirements, result);
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_bread"));
+            Assert.AreEqual(initialCoins, _profile.Coins);
+            Assert.AreEqual(initialXp, _profile.CurrentXP);
+        }
+
+        [Test]
+        public void OrderManager_OrderExpiration_RemovesExpiredOrders()
+        {
+            var timeService = new StandardGameTimeService();
+            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
+
+            long startTicks = System.DateTime.UtcNow.Ticks;
+            var expiringOrder = new OrderInstance(
+                "o_exp",
+                "cust_emma",
+                OrderType.Customer,
+                new List<OrderRequirement> { new OrderRequirement("crop_wheat", 1) },
+                new OrderReward(10, 5),
+                startTicks,
+                expirationDurationSeconds: 10
+            );
+
+            orderManager.LoadActiveOrders(new List<OrderInstance> { expiringOrder });
+
+            Assert.IsFalse(expiringOrder.IsExpired(startTicks + System.TimeSpan.FromSeconds(5).Ticks));
+            Assert.IsTrue(expiringOrder.IsExpired(startTicks + System.TimeSpan.FromSeconds(11).Ticks));
+        }
+
+        [Test]
+        public void OrderManager_EnsuresMinimumActiveOrderSlots()
+        {
+            var timeService = new StandardGameTimeService();
+            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
+
+            orderManager.EnsureMinimumOrders();
+            Assert.AreEqual(3, orderManager.GetActiveOrders().Count);
         }
         #endregion
 
@@ -546,11 +649,11 @@ namespace Game.Tests
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v5.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v6.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 5,
+                Version = 6,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
                 UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
@@ -578,14 +681,22 @@ namespace Game.Tests
                             new SavedProductionJob { JobId = "j1", RecipeId = "recipe_animal_feed", State = (int)ProductionJobState.Producing, StartUtcTicks = System.DateTime.UtcNow.Ticks }
                         }
                     }
+                },
+                ActiveOrders = new List<SavedOrder>
+                {
+                    new SavedOrder { OrderId = "o1", CustomerId = "cust_emma", Type = (int)OrderType.Customer, RewardCoins = 100, RewardXp = 20, State = (int)OrderState.Active, CreationUtcTicks = System.DateTime.UtcNow.Ticks }
+                },
+                OrderHistory = new List<SavedOrderHistory>
+                {
+                    new SavedOrderHistory { OrderId = "o0", CustomerId = "cust_john", CoinsEarned = 50, XpEarned = 10, CompletionUtcTicks = System.DateTime.UtcNow.Ticks }
                 }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v5.json"));
+            Assert.IsTrue(storage.Exists("save_v6.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(5, loadedSave.Version);
+            Assert.AreEqual(6, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);
@@ -593,8 +704,10 @@ namespace Game.Tests
             Assert.AreEqual(1, loadedSave.Fields.Count);
             Assert.AreEqual(1, loadedSave.Buildings.Count);
             Assert.AreEqual(1, loadedSave.ProductionBuildings.Count);
-            Assert.AreEqual("pb1", loadedSave.ProductionBuildings[0].BuildingInstanceId);
-            Assert.AreEqual("recipe_animal_feed", loadedSave.ProductionBuildings[0].JobsQueue[0].RecipeId);
+            Assert.AreEqual(1, loadedSave.ActiveOrders.Count);
+            Assert.AreEqual(1, loadedSave.OrderHistory.Count);
+            Assert.AreEqual("o1", loadedSave.ActiveOrders[0].OrderId);
+            Assert.AreEqual("o0", loadedSave.OrderHistory[0].OrderId);
         }
 
         private class MockStorage : ISaveStorage

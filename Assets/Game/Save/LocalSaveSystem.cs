@@ -82,9 +82,40 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedOrderRequirement
+    {
+        public string ItemId;
+        public int Quantity;
+    }
+
+    [Serializable]
+    public class SavedOrder
+    {
+        public string OrderId;
+        public string CustomerId;
+        public int Type;
+        public List<SavedOrderRequirement> Requirements = new List<SavedOrderRequirement>();
+        public long RewardCoins;
+        public int RewardXp;
+        public int State;
+        public long CreationUtcTicks;
+        public long ExpirationUtcTicks;
+    }
+
+    [Serializable]
+    public class SavedOrderHistory
+    {
+        public string OrderId;
+        public string CustomerId;
+        public long CoinsEarned;
+        public int XpEarned;
+        public long CompletionUtcTicks;
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 5;
+        public int Version = 6;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -93,6 +124,8 @@ namespace Game.Save
         public List<SavedField> Fields = new List<SavedField>();
         public List<SavedBuilding> Buildings = new List<SavedBuilding>();
         public List<SavedProductionBuilding> ProductionBuildings = new List<SavedProductionBuilding>();
+        public List<SavedOrder> ActiveOrders = new List<SavedOrder>();
+        public List<SavedOrderHistory> OrderHistory = new List<SavedOrderHistory>();
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
@@ -108,7 +141,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 5;
+        public const int CurrentSaveVersion = 6;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -225,6 +258,12 @@ namespace Game.Save
             if (data.Version < 5)
             {
                 if (data.ProductionBuildings == null) data.ProductionBuildings = new List<SavedProductionBuilding>();
+            }
+
+            if (data.Version < 6)
+            {
+                if (data.ActiveOrders == null) data.ActiveOrders = new List<SavedOrder>();
+                if (data.OrderHistory == null) data.OrderHistory = new List<SavedOrderHistory>();
             }
 
             data.Version = CurrentSaveVersion;

@@ -3,6 +3,7 @@ using Game.World;
 using Game.Farming;
 using Game.Buildings;
 using Game.Production;
+using Game.Orders;
 using Game.Inventory;
 using Game.Economy;
 using Game.Save;
@@ -20,6 +21,7 @@ namespace Game.UI
         private BuildingManager _buildingManager;
         private EconomyManager _economyManager;
         private ProductionManager _productionManager;
+        private OrderManager _orderManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -34,7 +36,8 @@ namespace Game.UI
             InventoryManager inventoryManager = null,
             BuildingManager buildingManager = null,
             EconomyManager economyManager = null,
-            ProductionManager productionManager = null)
+            ProductionManager productionManager = null,
+            OrderManager orderManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -46,6 +49,7 @@ namespace Game.UI
             _buildingManager = buildingManager;
             _economyManager = economyManager;
             _productionManager = productionManager;
+            _orderManager = orderManager;
         }
 
         public void ToggleDevMenu()
@@ -85,6 +89,9 @@ namespace Game.UI
                 _inventoryManager.AddItem("stone", "Stone", ItemType.RawMaterial, 50);
                 _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 50);
                 _inventoryManager.AddItem("crop_sugarcane", "Sugarcane", ItemType.Crop, 50);
+                _inventoryManager.AddItem("item_flour", "Flour", ItemType.ManufacturedGood, 20);
+                _inventoryManager.AddItem("item_sugar", "Sugar", ItemType.ManufacturedGood, 20);
+                _inventoryManager.AddItem("item_bread", "Bread", ItemType.ManufacturedGood, 20);
             }
         }
 
@@ -132,6 +139,27 @@ namespace Game.UI
                 foreach (var pb in prodBuildings)
                 {
                     _productionManager.DevInstantCompleteCurrentJob(pb.BuildingInstanceId);
+                }
+            }
+        }
+
+        public void DevGenerateNewOrder()
+        {
+            _orderManager?.DevGenerateNewOrder();
+        }
+
+        public void DevFulfillFirstOrder()
+        {
+            if (_orderManager != null)
+            {
+                var orders = _orderManager.GetActiveOrders();
+                if (orders != null && orders.Count > 0)
+                {
+                    foreach (var req in orders[0].Requirements)
+                    {
+                        _inventoryManager.AddItem(req.ItemId, req.ItemId, ItemType.ManufacturedGood, req.Quantity);
+                    }
+                    _orderManager.FulfillOrder(orders[0].OrderId);
                 }
             }
         }
