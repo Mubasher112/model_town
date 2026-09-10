@@ -20,7 +20,7 @@ Assets/Game/
 ├── Buildings/    # BuildingInstance, BuildingManager, BuildingStates
 ├── Camera/       # Mobile camera controller (Pan, Pinch-to-zoom, bounds)
 ├── Core/         # GameManager and Bootstrap initialization
-├── Data/         # Data definitions (Buildings, Crops, Recipes, Orders, Items)
+├── Data/         # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items)
 ├── Economy/      # EconomyManager for centralized coin/gem/XP transactions
 ├── Farming/      # FarmManager, FieldInstance, CropGrowthSystem, FieldStates
 ├── Input/        # MobileInputManager supporting Tap, Drag, Pinch, Long Press
@@ -29,11 +29,12 @@ Assets/Game/
 ├── Platforms/    # PlatformServiceFactory and Platform implementations
 ├── Player/       # PlayerProfile (Level, XP, Coins, Gems)
 ├── Production/   # ProductionManager, ProductionJob, ProductionBuildingInstance, ProductionStates
-├── Save/         # LocalSaveSystem (Versioned JSON save v6, corruption recovery)
+├── Residents/    # PopulationManager, HappinessManager, ResidentInstance, HappinessModifier, PopulationStats
+├── Save/         # LocalSaveSystem (Versioned JSON save v7, corruption recovery)
 ├── Services/     # Abstractions & GameTimeService (Auth, CloudSave, IAP, Ads, Analytics, UTC time)
 ├── Tests/        # Automated NUnit test suite & Assembly Definition
-├── UI/           # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, DevDebugToolsHandler
-└── World/        # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer
+├── UI/           # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, DevDebugToolsHandler
+└── World/        # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer, ResidentWorldRenderer
 ```
 
 ---
@@ -41,64 +42,63 @@ Assets/Game/
 ## 3. Core Gameplay Loop Integration
 
 ```
-Farm Crops → Harvest → Process Resources → Fulfill Orders → Earn Coins + XP → Upgrade & Expand Town
+Farm Crops → Harvest → Process Resources → Fulfill Orders → Earn Coins + XP → Build & Expand Town → Move In Residents & Boost Happiness
 ```
 
 1. **Farming**: Plant crops (Wheat, Corn, Carrot, Sugarcane, Tomato) and harvest yield into inventory.
 2. **Production**: Process raw crops in factories (Feed Mill, Bakery, Sugar Mill, Dairy Factory) into manufactured goods (Animal Feed, Flour, Bread, Sugar, Milk).
 3. **Orders**: Deliver products to customers (Emma, John, Maya, Bob, Alex) to claim coin and XP rewards.
-4. **Progression & Expansion**: Earn XP to level up, unlock new crops, recipes, and buildings, and spend coins to build structures or unlock land expansion zones.
+4. **Buildings & Housing**: Construct residential houses (Small House: +2 pop, Family House: +4 pop), community buildings (Town Hall, Fountain), and storage (Barn).
+5. **Residents & Happiness**: Auto-spawn eligible residents when completed housing becomes available, assign residents to houses, and maintain town happiness (`0–100%`).
 
 ---
 
-## 4. Orders and Delivery System Architecture
+## 4. Population, Residents & Happiness System
 
-### Order Types & Customer Profiles
-- **Order Types**: `Customer`, `Town`, `Delivery`.
-- **Customers**: Initial sample customers include `Emma` (Farmer), `John` (Baker), `Maya` (Shopkeeper), `Bob` (Builder), and `Alex` (Resident).
+### Population Tracking & Housing Assignment
+- **Housing Capacity**: Derived exclusively from **completed** residential buildings. Under-construction buildings contribute 0 capacity.
+- **Resident Auto-Spawning**: When completed housing capacity increases, `PopulationManager` automatically spawns eligible residents from `ResidentLibrary`.
+- **Safe Reassignment on House Removal**: When a residential building is removed, assigned residents become `Unassigned`. `PopulationManager` automatically attempts to reassign them to available houses in town without silently deleting residents.
 
-### Atomic Validation & Fulfillment
-- **Atomic Validation**: Order requirements (e.g., `Bread x2` + `Sugar x1`) are fully verified against current inventory before any items are deducted.
-- **Atomic Fulfillment**: All required items are removed, coin and XP rewards are credited to `PlayerProfile` and `EconomyManager`, the order is logged in history, and a replacement order is generated.
-- **Failed Fulfillment**: If any requested item quantity is missing, no inventory is removed, no rewards are granted, and an explicit notification (`Not enough products`) is displayed.
-
-### Order Generator & Expiration
-- **Order Generator**: Dynamically generates orders matching player level and unlocked products.
-- **Timestamp Expiration**: Orders track creation and expiration UTC timestamps (`CreationUtcTicks`, `ExpirationUtcTicks`). Expired orders are automatically pruned and replaced.
+### Happiness System & Modifiers
+`HappinessManager` calculates a deterministic score:
+$$\text{Happiness} = \text{Base (50)} + \text{Community Facility Bonuses} - \text{Housing Shortage Penalties}$$
+- **Rating Thresholds**:
+  - `80–100%`: Excellent
+  - `60–79%`: Good
+  - `40–59%`: Average
+  - `20–39%`: Low
+  - `0–19%`: Critical
+- **Housing Shortage Penalty**: Applies a -10 score penalty for each unhoused resident when population exceeds housing capacity.
 
 ---
 
 ## 5. Development & Debug Tools
 `DevDebugToolsHandler` provides developer convenience methods during testing:
-- **Generate New Order**: Instantly generates a new level-appropriate customer order.
-- **Fulfill First Order**: Automatically adds required order items to inventory and fulfills the active order.
+- **Add Resident**: Spawns a new resident into town.
+- **Recalculate Pop & Happiness**: Re-evaluates town population stats, house assignments, and happiness scores.
+- **Set Happiness Score**: Overrides town happiness score for testing.
+- **Generate New Order**: Instantly generates a new customer order.
+- **Fulfill First Order**: Auto-adds required items and fulfills the active order.
 - **Give Coins & Gems**: Grants 5,000 coins and 100 gems.
 - **Give Materials & Manufactured Goods**: Grants 50 wood, stone, wheat, sugarcane, flour, sugar, and bread.
 - **Give Seeds**: Adds 20 seeds for all crop types to inventory.
-- **Instant Complete All Production Jobs**: Instantly completes active production jobs.
-- **Instant Complete All Constructions**: Instantly completes active constructions and upgrades.
+- **Instant Complete All Productions & Constructions**: Instantly completes active jobs and constructions.
 - **Instant Grow All Fields**: Instantly advances all planted crops to `Ready` state.
 - **Unlock All Land**: Unlocks all land expansion zones instantly.
 
 ---
 
-## 6. How to Extend Orders
-1. Define a new `OrderTemplateConfig` in `OrderTemplateLibrary` (`Assets/Game/Data/GameConfig.cs`):
-```csharp
-new OrderTemplateConfig(
-    "order_bread_milk",
-    OrderType.Customer,
-    minLevel: 4,
-    new List<OrderRequirement> { new OrderRequirement("item_bread", 2), new OrderRequirement("item_milk", 1) },
-    new OrderReward(coins: 200, xp: 40)
-)
-```
-2. The `OrderGenerator` will automatically include the new template when generating orders for players at or above Level 4.
+## 6. How to Extend Residents & Community Buildings
+1. **Adding a New Resident Type**:
+   - Register a `ResidentDefinition` in `ResidentLibrary` (`Assets/Game/Data/ResidentData.cs`).
+2. **Adding a New Community Building**:
+   - Add a `BuildingConfig` with `Category = BuildingCategory.Community` and specify `HappinessBonus` in `BuildingLibrary` (`Assets/Game/Data/GameConfig.cs`).
 
 ---
 
 ## 7. Running Automated Tests
-Run all 30 automated unit tests directly via .NET CLI:
+Run all 38 automated unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```

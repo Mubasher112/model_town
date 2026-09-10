@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Game.Inventory;
 using Game.Player;
+using Game.Data;
 
 namespace Game.Save
 {
@@ -113,9 +114,20 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedResident
+    {
+        public string ResidentId;
+        public string ResidentTypeId;
+        public string DisplayName;
+        public string AssignedHouseInstanceId;
+        public int State;
+        public long CreationUtcTicks;
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 6;
+        public int Version = 7;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -126,6 +138,7 @@ namespace Game.Save
         public List<SavedProductionBuilding> ProductionBuildings = new List<SavedProductionBuilding>();
         public List<SavedOrder> ActiveOrders = new List<SavedOrder>();
         public List<SavedOrderHistory> OrderHistory = new List<SavedOrderHistory>();
+        public List<SavedResident> Residents = new List<SavedResident>();
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
@@ -141,7 +154,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 6;
+        public const int CurrentSaveVersion = 7;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -264,6 +277,11 @@ namespace Game.Save
             {
                 if (data.ActiveOrders == null) data.ActiveOrders = new List<SavedOrder>();
                 if (data.OrderHistory == null) data.OrderHistory = new List<SavedOrderHistory>();
+            }
+
+            if (data.Version < 7)
+            {
+                if (data.Residents == null) data.Residents = new List<SavedResident>();
             }
 
             data.Version = CurrentSaveVersion;

@@ -4,6 +4,7 @@ using Game.Farming;
 using Game.Buildings;
 using Game.Production;
 using Game.Orders;
+using Game.Residents;
 using Game.Inventory;
 using Game.Economy;
 using Game.Save;
@@ -22,6 +23,7 @@ namespace Game.UI
         private EconomyManager _economyManager;
         private ProductionManager _productionManager;
         private OrderManager _orderManager;
+        private PopulationManager _populationManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -37,7 +39,8 @@ namespace Game.UI
             BuildingManager buildingManager = null,
             EconomyManager economyManager = null,
             ProductionManager productionManager = null,
-            OrderManager orderManager = null)
+            OrderManager orderManager = null,
+            PopulationManager populationManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -50,6 +53,7 @@ namespace Game.UI
             _economyManager = economyManager;
             _productionManager = productionManager;
             _orderManager = orderManager;
+            _populationManager = populationManager;
         }
 
         public void ToggleDevMenu()
@@ -105,6 +109,21 @@ namespace Game.UI
                 _inventoryManager.AddItem("seed_sugarcane", "Sugarcane Seeds", ItemType.Seed, 20);
                 _inventoryManager.AddItem("seed_tomato", "Tomato Seeds", ItemType.Seed, 20);
             }
+        }
+
+        public void DevAddResident()
+        {
+            _populationManager?.DevAddResident();
+        }
+
+        public void DevRecalculatePopulationAndHappiness()
+        {
+            _populationManager?.RecalculatePopulationAndAssignments();
+        }
+
+        public void DevSetHappinessScore(int score)
+        {
+            _populationManager?.GetHappinessManager()?.SetOverrideScore(score);
         }
 
         public void DevInstantGrowAllFields()

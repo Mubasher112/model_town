@@ -33,6 +33,7 @@ namespace Game.Buildings
         private readonly StandardGameTimeService _timeService;
 
         public event Action<BuildingInstance> OnBuildingStateChanged;
+        public event Action<string> OnBuildingRemoved;
         public event Action<string> OnNotificationMessage;
         public event Action OnTownStatsChanged;
 
@@ -129,14 +130,12 @@ namespace Game.Buildings
                 return BuildingOperationResult.BuildingLocked;
             }
 
-            // Check coin cost
             if (!_economyManager.CanAffordCoins(config.BuildCostCoins))
             {
                 OnNotificationMessage?.Invoke("Not enough coins");
                 return BuildingOperationResult.CannotAffordCoins;
             }
 
-            // Check material cost
             if (config.RequiredMaterials != null)
             {
                 foreach (var mat in config.RequiredMaterials)
@@ -149,7 +148,6 @@ namespace Game.Buildings
                 }
             }
 
-            // Check placement validity
             var footprint = new ObjectFootprint(config.Width, config.Height);
             string instanceId = "bldg_" + Guid.NewGuid().ToString().Substring(0, 6);
 
@@ -159,7 +157,6 @@ namespace Game.Buildings
                 return BuildingOperationResult.PlacementInvalid;
             }
 
-            // Deduct resources once
             _economyManager.SpendCoins(config.BuildCostCoins);
             if (config.RequiredMaterials != null)
             {
@@ -176,7 +173,6 @@ namespace Game.Buildings
                 State = BuildingState.UnderConstruction
             };
 
-            // If 0 construction time (e.g. tree/decorations), complete instantly
             if (config.ConstructionTimeSeconds <= 0f)
             {
                 instance.State = BuildingState.Completed;
@@ -237,6 +233,7 @@ namespace Game.Buildings
             {
                 _buildings.Remove(instanceId);
                 RecalculateTownCapacities();
+                OnBuildingRemoved?.Invoke(instanceId);
                 OnNotificationMessage?.Invoke("Building removed");
                 return true;
             }
@@ -263,7 +260,7 @@ namespace Game.Buildings
             }
 
             TotalPopulationCapacity = popCap;
-            _inventoryManager.MaxCapacity = 100 + storageBonus; // Base 100 + Barn upgrades
+            _inventoryManager.MaxCapacity = 100 + storageBonus;
             OnTownStatsChanged?.Invoke();
         }
 

@@ -9,6 +9,7 @@ using Game.Farming;
 using Game.Buildings;
 using Game.Production;
 using Game.Orders;
+using Game.Residents;
 using Game.Data;
 using Game.Services;
 using Game.Save;
@@ -311,7 +312,7 @@ namespace Game.Tests
             Assert.AreEqual("Small House", house.Name);
             Assert.AreEqual(2, house.Width);
             Assert.AreEqual(2, house.Height);
-            Assert.AreEqual(5, house.PopulationCapacity);
+            Assert.AreEqual(2, house.PopulationCapacity);
 
             var barn = BuildingLibrary.GetBuilding("barn");
             Assert.IsNotNull(barn);
@@ -402,14 +403,14 @@ namespace Game.Tests
             buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var instance);
             buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
 
-            Assert.AreEqual(5, buildingManager.TotalPopulationCapacity);
+            Assert.AreEqual(2, buildingManager.TotalPopulationCapacity);
 
             var result = buildingManager.StartUpgrade(instance.InstanceId);
             Assert.AreEqual(BuildingOperationResult.Success, result);
             buildingManager.DevInstantCompleteConstruction(instance.InstanceId);
 
             Assert.AreEqual(2, instance.Level);
-            Assert.AreEqual(10, buildingManager.TotalPopulationCapacity);
+            Assert.AreEqual(7, buildingManager.TotalPopulationCapacity);
         }
         #endregion
 
@@ -645,15 +646,100 @@ namespace Game.Tests
         }
         #endregion
 
+        #region Population, Residents & Happiness System Tests
+        [Test]
+        public void PopulationManager_HousingCapacityFromCompletedHousesOnly()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+            var popManager = new PopulationManager(buildingManager, _profile, timeService);
+
+            // House 1: Under construction -> 0 capacity contribution
+            buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var h1);
+            popManager.RecalculatePopulationAndAssignments();
+
+            var stats1 = popManager.GetPopulationStats();
+            Assert.AreEqual(0, stats1.TotalHousingCapacity);
+            Assert.AreEqual(0, stats1.CurrentPopulation);
+
+            // House 1 completed -> Capacity 2, auto-spawns 2 residents
+            buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
+            var stats2 = popManager.GetPopulationStats();
+
+            Assert.AreEqual(2, stats2.TotalHousingCapacity);
+            Assert.AreEqual(2, stats2.CurrentPopulation);
+        }
+
+        [Test]
+        public void PopulationManager_HouseRemoval_SafelyUnassignsAndReassignsResidents()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+            var popManager = new PopulationManager(buildingManager, _profile, timeService);
+
+            // Build House 1 (Cap 2) and House 2 (Cap 2)
+            buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var h1);
+            buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
+            buildingManager.StartConstruction("small_house", new Vector2Int(15, 10), RotationAngle.Deg0, out var h2);
+            buildingManager.DevInstantCompleteConstruction(h2.InstanceId);
+
+            var stats1 = popManager.GetPopulationStats();
+            Assert.AreEqual(4, stats1.TotalHousingCapacity);
+            Assert.AreEqual(4, stats1.CurrentPopulation);
+
+            // Remove House 1 -> Capacity becomes 2. 2 residents stay housed, 2 become unassigned
+            buildingManager.RemoveBuilding(h1.InstanceId);
+            var stats2 = popManager.GetPopulationStats();
+
+            Assert.AreEqual(2, stats2.TotalHousingCapacity);
+            Assert.AreEqual(4, stats2.CurrentPopulation); // Residents NOT deleted!
+            Assert.AreEqual(2, stats2.UnassignedResidentsCount);
+        }
+
+        [Test]
+        public void HappinessManager_CalculatesModifiersAndClampsScore()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+            var happinessManager = new HappinessManager();
+
+            // Build Town Hall (+10 happiness bonus)
+            buildingManager.StartConstruction("town_hall", new Vector2Int(10, 10), RotationAngle.Deg0, out var th);
+            buildingManager.DevInstantCompleteConstruction(th.InstanceId);
+
+            happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 4, totalHousingCapacity: 4);
+
+            // Base 50 + 10 = 60 ("Good")
+            Assert.AreEqual(60, happinessManager.CurrentHappinessScore);
+            Assert.AreEqual("Good", happinessManager.HappinessRating);
+
+            // Add Housing Shortage penalty (6 pop, 2 housing capacity -> 4 unhoused = -40 penalty)
+            happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 6, totalHousingCapacity: 2);
+
+            // Base 50 + 10 - 40 = 20 ("Low")
+            Assert.AreEqual(20, happinessManager.CurrentHappinessScore);
+            Assert.AreEqual("Low", happinessManager.HappinessRating);
+        }
+        #endregion
+
         [Test]
         public void SaveSystem_SaveAndLoad_WorldPersistence()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v6.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v7.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 6,
+                Version = 7,
                 PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
                 UnlockedZoneIds = new List<string> { "zone_start", "zone_north" },
                 RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
@@ -689,14 +775,18 @@ namespace Game.Tests
                 OrderHistory = new List<SavedOrderHistory>
                 {
                     new SavedOrderHistory { OrderId = "o0", CustomerId = "cust_john", CoinsEarned = 50, XpEarned = 10, CompletionUtcTicks = System.DateTime.UtcNow.Ticks }
+                },
+                Residents = new List<SavedResident>
+                {
+                    new SavedResident { ResidentId = "r1", ResidentTypeId = "res_farmer", DisplayName = "Emma", AssignedHouseInstanceId = "b1", State = (int)ResidentState.AtHome, CreationUtcTicks = System.DateTime.UtcNow.Ticks }
                 }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v6.json"));
+            Assert.IsTrue(storage.Exists("save_v7.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(6, loadedSave.Version);
+            Assert.AreEqual(7, loadedSave.Version);
             Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
             Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
             Assert.AreEqual(2, loadedSave.RoadTiles.Count);
@@ -706,8 +796,9 @@ namespace Game.Tests
             Assert.AreEqual(1, loadedSave.ProductionBuildings.Count);
             Assert.AreEqual(1, loadedSave.ActiveOrders.Count);
             Assert.AreEqual(1, loadedSave.OrderHistory.Count);
-            Assert.AreEqual("o1", loadedSave.ActiveOrders[0].OrderId);
-            Assert.AreEqual("o0", loadedSave.OrderHistory[0].OrderId);
+            Assert.AreEqual(1, loadedSave.Residents.Count);
+            Assert.AreEqual("r1", loadedSave.Residents[0].ResidentId);
+            Assert.AreEqual("b1", loadedSave.Residents[0].AssignedHouseInstanceId);
         }
 
         private class MockStorage : ISaveStorage

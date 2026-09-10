@@ -167,6 +167,7 @@ namespace Game.Data
         public int XpReward = 10;
         public int PopulationCapacity = 0;
         public int StorageCapacityBonus = 0;
+        public int HappinessBonus = 0;
         public int MaxUpgradeLevel = 2;
 
         public long UpgradeCostCoins = 200;
@@ -188,7 +189,8 @@ namespace Game.Data
             int unlockLevel = 1,
             int xpReward = 10,
             int populationCapacity = 0,
-            int storageCapacityBonus = 0)
+            int storageCapacityBonus = 0,
+            int happinessBonus = 0)
         {
             BuildingId = buildingId;
             Name = name;
@@ -202,6 +204,7 @@ namespace Game.Data
             XpReward = xpReward;
             PopulationCapacity = populationCapacity;
             StorageCapacityBonus = storageCapacityBonus;
+            HappinessBonus = happinessBonus;
         }
     }
 
@@ -211,11 +214,11 @@ namespace Game.Data
         {
             {
                 "small_house",
-                new BuildingConfig("small_house", "Small House", "Increases town population capacity.", BuildingCategory.Residential, 2, 2, 100, 15f, unlockLevel: 1, xpReward: 15, populationCapacity: 5)
+                new BuildingConfig("small_house", "Small House", "Increases town population capacity.", BuildingCategory.Residential, 2, 2, 100, 15f, unlockLevel: 1, xpReward: 15, populationCapacity: 2)
             },
             {
                 "family_house",
-                new BuildingConfig("family_house", "Family House", "Provides higher population capacity for growing towns.", BuildingCategory.Residential, 3, 2, 300, 45f, unlockLevel: 2, xpReward: 35, populationCapacity: 12)
+                new BuildingConfig("family_house", "Family House", "Provides higher population capacity for growing towns.", BuildingCategory.Residential, 3, 2, 300, 45f, unlockLevel: 2, xpReward: 35, populationCapacity: 4)
             },
             {
                 "barn",
@@ -223,7 +226,7 @@ namespace Game.Data
             },
             {
                 "town_hall",
-                new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50)
+                new BuildingConfig("town_hall", "Town Hall", "Main administration building of the town.", BuildingCategory.Community, 3, 3, 500, 60f, unlockLevel: 1, xpReward: 50, happinessBonus: 10)
             },
             {
                 "feed_mill",
@@ -243,15 +246,15 @@ namespace Game.Data
             },
             {
                 "tree",
-                new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2)
+                new BuildingConfig("tree", "Pine Tree", "A nice decorative pine tree.", BuildingCategory.Decoration, 1, 1, 20, 0f, unlockLevel: 1, xpReward: 2, happinessBonus: 2)
             },
             {
                 "flower_bed",
-                new BuildingConfig("flower_bed", "Flower Bed", "Colorful flower bed decoration.", BuildingCategory.Decoration, 1, 1, 30, 0f, unlockLevel: 1, xpReward: 3)
+                new BuildingConfig("flower_bed", "Flower Bed", "Colorful flower bed decoration.", BuildingCategory.Decoration, 1, 1, 30, 0f, unlockLevel: 1, xpReward: 3, happinessBonus: 3)
             },
             {
                 "small_fountain",
-                new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15)
+                new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15, happinessBonus: 5)
             }
         };
 

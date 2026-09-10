@@ -9,6 +9,7 @@ using Game.Farming;
 using Game.Buildings;
 using Game.Production;
 using Game.Orders;
+using Game.Residents;
 using Game.Data;
 using Game.Save;
 using Game.Platforms;
@@ -34,6 +35,8 @@ namespace Game.Core
         public BuildingManager BuildingManager { get; private set; }
         public ProductionManager ProductionManager { get; private set; }
         public OrderManager OrderManager { get; private set; }
+        public PopulationManager PopulationManager { get; private set; }
+        public HappinessManager HappinessManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
@@ -45,9 +48,10 @@ namespace Game.Core
         [SerializeField] private BuildingInfoUIController buildingInfoUIController;
         [SerializeField] private ProductionUIController productionUIController;
         [SerializeField] private OrdersUIController ordersUIController;
+        [SerializeField] private TownOverviewUIController townOverviewUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v6.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v7.json");
 
         private void Awake()
         {
@@ -68,6 +72,7 @@ namespace Game.Core
             PlatformServices = PlatformServiceFactory.CreatePlatformServices();
             SaveSystem = new LocalSaveSystem(SaveFilePath);
             TimeService = new StandardGameTimeService();
+            HappinessManager = new HappinessManager();
 
             LoadGame();
 
@@ -94,7 +99,7 @@ namespace Game.Core
 
             if (buildingInfoUIController != null)
             {
-                buildingInfoUIController.Initialize(BuildingManager, EconomyManager, PlayerProfile);
+                buildingInfoUIController.Initialize(BuildingManager, EconomyManager, PlayerProfile, PopulationManager);
             }
 
             if (productionUIController != null)
@@ -107,9 +112,14 @@ namespace Game.Core
                 ordersUIController.Initialize(OrderManager, InventoryManager, PlayerProfile);
             }
 
+            if (townOverviewUIController != null)
+            {
+                townOverviewUIController.Initialize(PopulationManager, PlayerProfile, BuildingManager);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager, PopulationManager);
             }
 
             if (cameraController != null)
@@ -338,6 +348,20 @@ namespace Game.Core
                 });
             }
 
+            var residents = PopulationManager.GetAllResidents();
+            foreach (var res in residents)
+            {
+                saveData.Residents.Add(new SavedResident
+                {
+                    ResidentId = res.ResidentId,
+                    ResidentTypeId = res.ResidentTypeId,
+                    DisplayName = res.DisplayName,
+                    AssignedHouseInstanceId = res.AssignedHouseInstanceId,
+                    State = (int)res.State,
+                    CreationUtcTicks = res.CreationUtcTicks
+                });
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -367,6 +391,7 @@ namespace Game.Core
             BuildingManager = new BuildingManager(PlacementManager, EconomyManager, InventoryManager, PlayerProfile, TimeService);
             ProductionManager = new ProductionManager(InventoryManager, PlayerProfile, TimeService);
             OrderManager = new OrderManager(InventoryManager, EconomyManager, PlayerProfile, TimeService);
+            PopulationManager = new PopulationManager(BuildingManager, PlayerProfile, TimeService, HappinessManager);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
@@ -522,6 +547,21 @@ namespace Game.Core
                 }
                 OrderManager.LoadOrderHistory(loadedHistory);
             }
+
+            if (saveData.Residents != null)
+            {
+                foreach (var sr in saveData.Residents)
+                {
+                    var resInstance = new ResidentInstance(sr.ResidentId, sr.ResidentTypeId, sr.DisplayName, sr.CreationUtcTicks)
+                    {
+                        AssignedHouseInstanceId = sr.AssignedHouseInstanceId,
+                        State = (ResidentState)sr.State
+                    };
+                    PopulationManager.RegisterResident(resInstance);
+                }
+            }
+
+            PopulationManager.RecalculatePopulationAndAssignments();
         }
 
         private void OnDestroy()
