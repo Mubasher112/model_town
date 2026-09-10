@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using Game.Inventory;
 using Game.Player;
 using Game.Data;
+using Game.Services;
+using Game.Adventure;
 
 namespace Game.Save
 {
@@ -125,9 +127,39 @@ namespace Game.Save
     }
 
     [Serializable]
+    public class SavedAdventureCell
+    {
+        public int X;
+        public int Y;
+
+        public SavedAdventureCell() { }
+
+        public SavedAdventureCell(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
+    [Serializable]
+    public class SavedAdventureNode
+    {
+        public string NodeInstanceId;
+        public string NodeDefId;
+        public int X;
+        public int Y;
+        public int State;
+        public int CurrentQuantity;
+        public int MaxQuantity;
+        public long GatheringStartUtcTicks;
+        public long RespawnStartUtcTicks;
+        public bool IsCleared;
+    }
+
+    [Serializable]
     public class SaveData
     {
-        public int Version = 8;
+        public int Version = 9;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -142,6 +174,16 @@ namespace Game.Save
         public List<string> UnlockedZoneIds = new List<string>();
         public int MapWidth = 30;
         public int MapHeight = 30;
+
+        // Adventure Persistence Fields (v9)
+        public bool IsAdventureUnlocked = false;
+        public int AdventurePlayerX = 12;
+        public int AdventurePlayerY = 2;
+        public EnergyState EnergyState = new EnergyState();
+        public List<ToolInstance> ToolInstances = new List<ToolInstance>();
+        public List<SavedAdventureCell> DiscoveredAdventureCells = new List<SavedAdventureCell>();
+        public List<SavedAdventureNode> AdventureNodes = new List<SavedAdventureNode>();
+        public List<string> DiscoveredSpecialLocations = new List<string>();
     }
 
     public interface ISaveStorage
@@ -154,7 +196,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 8;
+        public const int CurrentSaveVersion = 9;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -239,7 +281,20 @@ namespace Game.Save
                     new InventoryItem("crop_sugarcane", "Sugarcane", ItemType.Crop, 10),
                     new InventoryItem("wood", "Wood", ItemType.RawMaterial, 20),
                     new InventoryItem("stone", "Stone", ItemType.RawMaterial, 10)
-                }
+                },
+                IsAdventureUnlocked = false,
+                AdventurePlayerX = 12,
+                AdventurePlayerY = 2,
+                EnergyState = new EnergyState(20, DateTime.UtcNow.Ticks),
+                ToolInstances = new List<ToolInstance>
+                {
+                    new ToolInstance("tool_pickaxe", 30, 30),
+                    new ToolInstance("tool_axe", 30, 30),
+                    new ToolInstance("tool_shovel", 25, 25)
+                },
+                DiscoveredAdventureCells = new List<SavedAdventureCell>(),
+                AdventureNodes = new List<SavedAdventureNode>(),
+                DiscoveredSpecialLocations = new List<string>()
             };
             Save(data);
             return data;
@@ -282,6 +337,29 @@ namespace Game.Save
             if (data.Version < 7)
             {
                 if (data.Residents == null) data.Residents = new List<SavedResident>();
+            }
+
+            if (data.Version < 8)
+            {
+                // Version 8 migration logic
+            }
+
+            if (data.Version < 9)
+            {
+                data.IsAdventureUnlocked = false;
+                if (data.EnergyState == null) data.EnergyState = new EnergyState(20, DateTime.UtcNow.Ticks);
+                if (data.ToolInstances == null)
+                {
+                    data.ToolInstances = new List<ToolInstance>
+                    {
+                        new ToolInstance("tool_pickaxe", 30, 30),
+                        new ToolInstance("tool_axe", 30, 30),
+                        new ToolInstance("tool_shovel", 25, 25)
+                    };
+                }
+                if (data.DiscoveredAdventureCells == null) data.DiscoveredAdventureCells = new List<SavedAdventureCell>();
+                if (data.AdventureNodes == null) data.AdventureNodes = new List<SavedAdventureNode>();
+                if (data.DiscoveredSpecialLocations == null) data.DiscoveredSpecialLocations = new List<string>();
             }
 
             data.Version = CurrentSaveVersion;

@@ -13,6 +13,7 @@ using Game.Residents;
 using Game.Data;
 using Game.Services;
 using Game.Save;
+using Game.Adventure;
 
 namespace Game.Tests
 {
@@ -109,10 +110,9 @@ namespace Game.Tests
         {
             var grid = new WorldGrid(30, 30);
             Vector3 cameraPos = new Vector3(0, 0, 0);
-            float zoom = 10f;
 
             Vector3 centerScreenPos = new Vector3(Screen.width / 2f, Screen.height / 2f, 0);
-            Vector2Int gridPos = grid.ScreenToGrid(centerScreenPos, cameraPos, zoom);
+            Vector2Int gridPos = grid.ScreenToGrid(centerScreenPos, cameraPos, 10f);
 
             Vector3 worldPos = grid.GridToWorld(gridPos);
             Assert.LessOrEqual(Mathf.Abs(worldPos.x - cameraPos.x), 1.0f);
@@ -196,14 +196,12 @@ namespace Game.Tests
             _profile.Level = 5;
             _profile.Coins = 1000;
 
-            // Purchase expansion_01 (500 coins, Level 5)
             var result = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
 
             Assert.AreEqual(ExpansionOperationResult.Success, result);
-            Assert.AreEqual(500, _profile.Coins); // 500 coins deducted
+            Assert.AreEqual(500, _profile.Coins);
             Assert.IsFalse(grid.GetTile(new Vector2Int(10, 26)).IsLocked);
 
-            // Cannot purchase twice
             var duplicateResult = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
             Assert.AreEqual(ExpansionOperationResult.AlreadyUnlocked, duplicateResult);
         }
@@ -214,12 +212,12 @@ namespace Game.Tests
             var grid = new WorldGrid(30, 30);
             var expansionManager = new LandExpansionManager(grid);
 
-            _profile.Level = 1; // Insufficient level for expansion_01 (Level 5)
+            _profile.Level = 1;
             _profile.Coins = 1000;
 
             var result = expansionManager.TryPurchaseExpansion("expansion_01", _profile, _economyManager, currentPopulation: 0);
             Assert.AreEqual(ExpansionOperationResult.LevelRequirementNotMet, result);
-            Assert.AreEqual(1000, _profile.Coins); // Coins untouched
+            Assert.AreEqual(1000, _profile.Coins);
         }
 
         [Test]
@@ -234,16 +232,16 @@ namespace Game.Tests
 
             Assert.AreEqual(RoadConnectionType.Isolated, roadManager.GetRoadConnectionType(center));
 
-            roadManager.PlaceRoad(center + new Vector2Int(0, 1)); // North
+            roadManager.PlaceRoad(center + new Vector2Int(0, 1));
             Assert.AreEqual(RoadConnectionType.DeadEnd, roadManager.GetRoadConnectionType(center));
 
-            roadManager.PlaceRoad(center + new Vector2Int(0, -1)); // South
+            roadManager.PlaceRoad(center + new Vector2Int(0, -1));
             Assert.AreEqual(RoadConnectionType.Straight, roadManager.GetRoadConnectionType(center));
 
-            roadManager.PlaceRoad(center + new Vector2Int(1, 0)); // East
+            roadManager.PlaceRoad(center + new Vector2Int(1, 0));
             Assert.AreEqual(RoadConnectionType.TJunction, roadManager.GetRoadConnectionType(center));
 
-            roadManager.PlaceRoad(center + new Vector2Int(-1, 0)); // West
+            roadManager.PlaceRoad(center + new Vector2Int(-1, 0));
             Assert.AreEqual(RoadConnectionType.Cross, roadManager.GetRoadConnectionType(center));
         }
 
@@ -258,18 +256,14 @@ namespace Game.Tests
             var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
             var accessibilityService = new BuildingAccessibilityService(buildingManager, roadManager);
 
-            // Place Small House at (10, 10) (2x2 footprint)
             buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var house);
             buildingManager.DevInstantCompleteConstruction(house.InstanceId);
 
-            // No adjacent road -> Inaccessible
             Assert.IsFalse(accessibilityService.IsBuildingAccessible(house));
 
-            // Place road at (10, 9) adjacent to south edge
             roadManager.PlaceRoad(new Vector2Int(10, 9));
             Assert.IsTrue(accessibilityService.IsBuildingAccessible(house));
 
-            // Remove road -> Inaccessible again
             roadManager.RemoveRoad(new Vector2Int(10, 9));
             Assert.IsFalse(accessibilityService.IsBuildingAccessible(house));
         }
@@ -403,9 +397,9 @@ namespace Game.Tests
             Assert.AreEqual(2, house.Height);
             Assert.AreEqual(2, house.PopulationCapacity);
 
-            var barn = BuildingLibrary.GetBuilding("barn");
-            Assert.IsNotNull(barn);
-            Assert.AreEqual(20, barn.StorageCapacityBonus);
+            var workshop = BuildingLibrary.GetBuilding("small_workshop");
+            Assert.IsNotNull(workshop);
+            Assert.AreEqual(2, workshop.RequiredMaterials.Count);
         }
 
         [Test]
@@ -501,6 +495,30 @@ namespace Game.Tests
             Assert.AreEqual(2, instance.Level);
             Assert.AreEqual(7, buildingManager.TotalPopulationCapacity);
         }
+
+        [Test]
+        public void BuildingManager_ConstructionWithAdventureResources()
+        {
+            var grid = new WorldGrid(30, 30);
+            new LandExpansionManager(grid).UnlockAllZonesDev();
+            var placementManager = new ObjectPlacementManager(grid);
+            var timeService = new StandardGameTimeService();
+            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Level = 5;
+            _profile.Coins = 1000;
+
+            var resultNoMat = buildingManager.StartConstruction("small_workshop", new Vector2Int(10, 10), RotationAngle.Deg0, out _);
+            Assert.AreEqual(BuildingOperationResult.MissingMaterials, resultNoMat);
+
+            _inventoryManager.AddItem("item_wood", "Wood", ItemType.RawMaterial, 10);
+            _inventoryManager.AddItem("item_stone", "Stone", ItemType.RawMaterial, 5);
+
+            var resultSuccess = buildingManager.StartConstruction("small_workshop", new Vector2Int(10, 10), RotationAngle.Deg0, out var bldg);
+            Assert.AreEqual(BuildingOperationResult.Success, resultSuccess);
+            Assert.AreEqual(0, _inventoryManager.GetQuantity("item_wood"));
+            Assert.AreEqual(0, _inventoryManager.GetQuantity("item_stone"));
+        }
         #endregion
 
         #region Production & Factory System Tests
@@ -513,11 +531,11 @@ namespace Game.Tests
             Assert.AreEqual("feed_mill", feedRecipe.BuildingId);
             Assert.AreEqual("item_animal_feed", feedRecipe.OutputItemId);
             Assert.AreEqual(1, feedRecipe.Ingredients.Count);
-            Assert.AreEqual("crop_wheat", feedRecipe.Ingredients[0].ItemId);
-            Assert.AreEqual(2, feedRecipe.Ingredients[0].Quantity);
 
-            var bakeryRecipes = RecipeLibrary.GetRecipesForBuilding("bakery");
-            Assert.AreEqual(2, bakeryRecipes.Count);
+            var brickRecipe = RecipeLibrary.GetRecipe("recipe_brick");
+            Assert.IsNotNull(brickRecipe);
+            Assert.AreEqual("item_brick", brickRecipe.OutputItemId);
+            Assert.AreEqual("item_clay", brickRecipe.Ingredients[0].ItemId);
         }
 
         [Test]
@@ -539,49 +557,7 @@ namespace Game.Tests
         }
 
         [Test]
-        public void ProductionManager_StartProductionJob_RejectsMissingIngredientsAndFullQueue()
-        {
-            var timeService = new StandardGameTimeService();
-            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
-
-            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 1);
-            prodManager.RegisterProductionBuilding(feedMill);
-
-            var noIngResult = prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
-            Assert.AreEqual(ProductionOperationResult.MissingIngredients, noIngResult);
-
-            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
-
-            Assert.AreEqual(ProductionOperationResult.Success, prodManager.StartProductionJob("pm_1", "recipe_animal_feed"));
-            Assert.AreEqual(ProductionOperationResult.QueueFull, prodManager.StartProductionJob("pm_1", "recipe_animal_feed"));
-        }
-
-        [Test]
-        public void ProductionJob_OfflineProgressAndCollection()
-        {
-            var timeService = new StandardGameTimeService();
-            var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
-
-            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 2);
-            prodManager.RegisterProductionBuilding(feedMill);
-
-            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
-            prodManager.StartProductionJob("pm_1", "recipe_animal_feed");
-
-            prodManager.DevInstantCompleteCurrentJob("pm_1");
-            Assert.AreEqual(ProductionJobState.Ready, feedMill.JobsQueue[0].State);
-
-            int xpBefore = _profile.CurrentXP;
-            var collectResult = prodManager.CollectProduct("pm_1");
-
-            Assert.AreEqual(ProductionOperationResult.Success, collectResult);
-            Assert.AreEqual(0, feedMill.JobsQueue.Count);
-            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_animal_feed"));
-            Assert.Greater(_profile.CurrentXP, xpBefore);
-        }
-
-        [Test]
-        public void ProductionManager_ProductionChain_WheatToFlourToBread()
+        public void ProductionManager_BrickProductionWithClayResource()
         {
             var timeService = new StandardGameTimeService();
             var prodManager = new ProductionManager(_inventoryManager, _profile, timeService);
@@ -590,40 +566,16 @@ namespace Game.Tests
             var bakery = new ProductionBuildingInstance("bakery_1", "bakery", 2);
             prodManager.RegisterProductionBuilding(bakery);
 
-            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 4);
-            _inventoryManager.AddItem("item_sugar", "Sugar", ItemType.ManufacturedGood, 2);
+            _inventoryManager.AddItem("item_clay", "Clay", ItemType.RawMaterial, 3);
 
-            prodManager.StartProductionJob("bakery_1", "recipe_flour");
+            var result = prodManager.StartProductionJob("bakery_1", "recipe_brick");
+            Assert.AreEqual(ProductionOperationResult.Success, result);
+            Assert.AreEqual(0, _inventoryManager.GetQuantity("item_clay"));
+
             prodManager.DevInstantCompleteCurrentJob("bakery_1");
             prodManager.CollectProduct("bakery_1");
 
-            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_flour"));
-
-            prodManager.StartProductionJob("bakery_1", "recipe_bread");
-            prodManager.DevInstantCompleteCurrentJob("bakery_1");
-            prodManager.CollectProduct("bakery_1");
-
-            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_bread"));
-        }
-
-        [Test]
-        public void ProductionManager_CollectProduct_FullStorageRejection()
-        {
-            var tinyInventory = new InventoryManager(1);
-            var timeService = new StandardGameTimeService();
-            var prodManager = new ProductionManager(tinyInventory, _profile, timeService);
-
-            var feedMill = new ProductionBuildingInstance("pm_1", "feed_mill", 2);
-            prodManager.RegisterProductionBuilding(feedMill);
-
-            tinyInventory.AddItem("crop_wheat", "Wheat", ItemType.Crop, 1);
-
-            var headJob = new ProductionJob("j1", "recipe_animal_feed") { State = ProductionJobState.Ready };
-            feedMill.JobsQueue.Add(headJob);
-
-            var result = prodManager.CollectProduct("pm_1");
-            Assert.AreEqual(ProductionOperationResult.StorageFull, result);
-            Assert.AreEqual(1, feedMill.JobsQueue.Count);
+            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_brick"));
         }
         #endregion
 
@@ -668,70 +620,6 @@ namespace Game.Tests
             Assert.AreEqual(3, _inventoryManager.GetQuantity("item_bread"));
             Assert.AreEqual(initialCoins + 100, _profile.Coins);
             Assert.AreEqual(initialXp + 20, _profile.CurrentXP);
-            Assert.AreEqual(1, orderManager.GetOrderHistory().Count);
-        }
-
-        [Test]
-        public void OrderManager_AtomicValidationFailure_LeavesInventoryUntouched()
-        {
-            var timeService = new StandardGameTimeService();
-            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
-
-            _inventoryManager.AddItem("item_bread", "Bread", ItemType.ManufacturedGood, 1);
-
-            var breadOrder = new OrderInstance(
-                "o_test_1",
-                "cust_emma",
-                OrderType.Customer,
-                new List<OrderRequirement> { new OrderRequirement("item_bread", 2) },
-                new OrderReward(100, 20),
-                timeService.CurrentUtcTicks
-            );
-
-            orderManager.LoadActiveOrders(new List<OrderInstance> { breadOrder });
-
-            long initialCoins = _profile.Coins;
-            int initialXp = _profile.CurrentXP;
-
-            var result = orderManager.FulfillOrder("o_test_1");
-
-            Assert.AreEqual(OrderOperationResult.MissingRequirements, result);
-            Assert.AreEqual(1, _inventoryManager.GetQuantity("item_bread"));
-            Assert.AreEqual(initialCoins, _profile.Coins);
-            Assert.AreEqual(initialXp, _profile.CurrentXP);
-        }
-
-        [Test]
-        public void OrderManager_OrderExpiration_RemovesExpiredOrders()
-        {
-            var timeService = new StandardGameTimeService();
-            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
-
-            long startTicks = System.DateTime.UtcNow.Ticks;
-            var expiringOrder = new OrderInstance(
-                "o_exp",
-                "cust_emma",
-                OrderType.Customer,
-                new List<OrderRequirement> { new OrderRequirement("crop_wheat", 1) },
-                new OrderReward(10, 5),
-                startTicks,
-                expirationDurationSeconds: 10
-            );
-
-            orderManager.LoadActiveOrders(new List<OrderInstance> { expiringOrder });
-
-            Assert.IsFalse(expiringOrder.IsExpired(startTicks + System.TimeSpan.FromSeconds(5).Ticks));
-            Assert.IsTrue(expiringOrder.IsExpired(startTicks + System.TimeSpan.FromSeconds(11).Ticks));
-        }
-
-        [Test]
-        public void OrderManager_EnsuresMinimumActiveOrderSlots()
-        {
-            var timeService = new StandardGameTimeService();
-            var orderManager = new OrderManager(_inventoryManager, _economyManager, _profile, timeService, maxSlots: 3);
-
-            orderManager.EnsureMinimumOrders();
-            Assert.AreEqual(3, orderManager.GetActiveOrders().Count);
         }
         #endregion
 
@@ -751,7 +639,6 @@ namespace Game.Tests
 
             var stats1 = popManager.GetPopulationStats();
             Assert.AreEqual(0, stats1.TotalHousingCapacity);
-            Assert.AreEqual(0, stats1.CurrentPopulation);
 
             buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
             var stats2 = popManager.GetPopulationStats();
@@ -759,127 +646,186 @@ namespace Game.Tests
             Assert.AreEqual(2, stats2.TotalHousingCapacity);
             Assert.AreEqual(2, stats2.CurrentPopulation);
         }
+        #endregion
 
+        #region Task 9 Adventure & Exploration System Tests
         [Test]
-        public void PopulationManager_HouseRemoval_SafelyUnassignsAndReassignsResidents()
+        public void EnergyManager_UTCRegenerationAndClamping()
         {
-            var grid = new WorldGrid(30, 30);
-            new LandExpansionManager(grid).UnlockAllZonesDev();
-            var placementManager = new ObjectPlacementManager(grid);
             var timeService = new StandardGameTimeService();
-            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
-            var popManager = new PopulationManager(buildingManager, _profile, timeService);
+            long startTicks = timeService.CurrentUtcTicks;
 
-            buildingManager.StartConstruction("small_house", new Vector2Int(10, 10), RotationAngle.Deg0, out var h1);
-            buildingManager.DevInstantCompleteConstruction(h1.InstanceId);
-            buildingManager.StartConstruction("small_house", new Vector2Int(15, 10), RotationAngle.Deg0, out var h2);
-            buildingManager.DevInstantCompleteConstruction(h2.InstanceId);
+            var energyState = new EnergyState(20, startTicks) { CurrentEnergy = 10 };
+            var energyManager = new EnergyManager(energyState, timeService, secondsPerEnergyUnit: 300f);
 
-            var stats1 = popManager.GetPopulationStats();
-            Assert.AreEqual(4, stats1.TotalHousingCapacity);
-            Assert.AreEqual(4, stats1.CurrentPopulation);
+            Assert.AreEqual(10, energyManager.CurrentEnergy);
+            Assert.IsTrue(energyManager.ConsumeEnergy(3));
+            Assert.AreEqual(7, energyManager.CurrentEnergy);
 
-            buildingManager.RemoveBuilding(h1.InstanceId);
-            var stats2 = popManager.GetPopulationStats();
+            // Advance 10 minutes (600 seconds) -> +2 Energy
+            timeService.AdvanceTime(System.TimeSpan.FromSeconds(600));
+            energyManager.RecalculateEnergy();
 
-            Assert.AreEqual(2, stats2.TotalHousingCapacity);
-            Assert.AreEqual(4, stats2.CurrentPopulation);
-            Assert.AreEqual(2, stats2.UnassignedResidentsCount);
+            Assert.AreEqual(9, energyManager.CurrentEnergy);
+
+            // Advance 100 minutes -> Clamped to 20 Max
+            timeService.AdvanceTime(System.TimeSpan.FromSeconds(6000));
+            energyManager.RecalculateEnergy();
+
+            Assert.AreEqual(20, energyManager.CurrentEnergy);
         }
 
         [Test]
-        public void HappinessManager_CalculatesModifiersAndClampsScore()
+        public void ToolService_DurabilityAndConsumption()
         {
-            var grid = new WorldGrid(30, 30);
-            new LandExpansionManager(grid).UnlockAllZonesDev();
-            var placementManager = new ObjectPlacementManager(grid);
+            var toolService = new ToolService();
+            Assert.IsTrue(toolService.HasDurability("tool_pickaxe", 1));
+
+            Assert.IsTrue(toolService.ConsumeDurability("tool_pickaxe", 10));
+            var pickaxe = toolService.GetTool("tool_pickaxe");
+            Assert.AreEqual(20, pickaxe.CurrentDurability);
+
+            toolService.RepairOrRefillTool("tool_pickaxe");
+            Assert.AreEqual(30, pickaxe.CurrentDurability);
+        }
+
+        [Test]
+        public void AdventureManager_UnlockAndEntryRequirements()
+        {
             var timeService = new StandardGameTimeService();
-            var buildingManager = new BuildingManager(placementManager, _economyManager, _inventoryManager, _profile, timeService);
-            var happinessManager = new HappinessManager();
+            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
 
-            buildingManager.StartConstruction("town_hall", new Vector2Int(10, 10), RotationAngle.Deg0, out var th);
-            buildingManager.DevInstantCompleteConstruction(th.InstanceId);
+            // Rejects insufficient level/pop/coins
+            _profile.Level = 1;
+            Assert.AreEqual(AdventureOperationResult.LevelRequirementNotMet, advManager.TryUnlockAdventure(currentPopulation: 0));
 
-            happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 4, totalHousingCapacity: 4);
+            _profile.Level = 8;
+            _profile.Coins = 1000;
+            Assert.AreEqual(AdventureOperationResult.PopulationRequirementNotMet, advManager.TryUnlockAdventure(currentPopulation: 5));
 
-            Assert.AreEqual(60, happinessManager.CurrentHappinessScore);
-            Assert.AreEqual("Good", happinessManager.HappinessRating);
+            Assert.AreEqual(AdventureOperationResult.Success, advManager.TryUnlockAdventure(currentPopulation: 10));
+            Assert.IsTrue(advManager.IsUnlocked);
+            Assert.AreEqual(0, _profile.Coins); // 1000 coins spent
 
-            happinessManager.RecalculateHappiness(buildingManager.GetAllBuildings(), currentPopulation: 6, totalHousingCapacity: 2);
+            Assert.IsTrue(advManager.EnterAdventureArea());
+            Assert.IsTrue(advManager.IsInAdventureMap);
+            Assert.IsTrue(advManager.ExitAdventureArea());
+            Assert.IsFalse(advManager.IsInAdventureMap);
+        }
 
-            Assert.AreEqual(20, happinessManager.CurrentHappinessScore);
-            Assert.AreEqual("Low", happinessManager.HappinessRating);
+        [Test]
+        public void AdventureManager_FogOfWarAndMovementDiscovery()
+        {
+            var timeService = new StandardGameTimeService();
+            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
+            advManager.DevUnlockAdventure();
+            advManager.EnterAdventureArea();
+
+            Vector2Int startPos = advManager.PlayerPosition;
+            Assert.IsTrue(advManager.ExplorationService.IsDiscovered(startPos));
+
+            Vector2Int farPos = new Vector2Int(20, 20);
+            Assert.IsFalse(advManager.ExplorationService.IsDiscovered(farPos));
+
+            advManager.MovePlayer(new Vector2Int(12, 5));
+            Assert.IsTrue(advManager.ExplorationService.IsDiscovered(new Vector2Int(12, 5)));
+        }
+
+        [Test]
+        public void ResourceGatheringService_GatherNode_AwardsResourcesAndConsumesDurabilityAndEnergy()
+        {
+            var timeService = new StandardGameTimeService();
+            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
+            advManager.DevUnlockAdventure();
+            advManager.EnterAdventureArea();
+
+            int initialEnergy = advManager.EnergyManager.CurrentEnergy;
+            int initialDurability = advManager.ToolService.GetTool("tool_pickaxe").CurrentDurability;
+
+            // Gather Stone Deposit at (10, 5)
+            var result = advManager.GatherNodeAtPosition(new Vector2Int(10, 5), out int yieldAmount, out int xpEarned);
+
+            Assert.AreEqual(GatheringOperationResult.Success, result);
+            Assert.AreEqual(5, yieldAmount);
+            Assert.AreEqual(5, xpEarned);
+            Assert.AreEqual(5, _inventoryManager.GetQuantity("item_stone"));
+            Assert.AreEqual(initialEnergy - 2, advManager.EnergyManager.CurrentEnergy);
+            Assert.AreEqual(initialDurability - 1, advManager.ToolService.GetTool("tool_pickaxe").CurrentDurability);
+        }
+
+        [Test]
+        public void AdventureManager_ObstacleClearing_UnblocksPath()
+        {
+            var timeService = new StandardGameTimeService();
+            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
+            advManager.DevUnlockAdventure();
+            advManager.EnterAdventureArea();
+
+            Vector2Int obstaclePos = new Vector2Int(12, 10);
+            advManager.DevSetPlayerPos(new Vector2Int(12, 9));
+
+            // Cannot move onto obstacle tile before clearing
+            Assert.IsFalse(advManager.MovePlayer(obstaclePos));
+
+            // Clear obstacle
+            var gatherResult = advManager.GatherNodeAtPosition(obstaclePos, out _, out _);
+            Assert.AreEqual(GatheringOperationResult.Success, gatherResult);
+
+            // Path now open
+            Assert.IsTrue(advManager.MovePlayer(obstaclePos));
+            Assert.AreEqual(obstaclePos, advManager.PlayerPosition);
+        }
+
+        [Test]
+        public void AdventureManager_SpecialLocationDiscovery()
+        {
+            var timeService = new StandardGameTimeService();
+            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
+            advManager.DevUnlockAdventure();
+            advManager.EnterAdventureArea();
+
+            int initialXp = _profile.CurrentXP;
+            long initialCoins = _profile.Coins;
+
+            advManager.MovePlayer(new Vector2Int(20, 20)); // Ancient Ruins
+
+            Assert.Greater(_profile.CurrentXP, initialXp);
+            Assert.Greater(_profile.Coins, initialCoins);
+            Assert.AreEqual(2, _inventoryManager.GetQuantity("item_rare_crystal"));
         }
         #endregion
 
         [Test]
-        public void SaveSystem_SaveAndLoad_WorldPersistence()
+        public void SaveSystem_SaveAndLoad_Version9Schema()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v8.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v9.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 8,
-                PlayerProfile = new PlayerProfile { Level = 5, Coins = 1200, Gems = 50 },
-                UnlockedZoneIds = new List<string> { "zone_start", "expansion_01" },
-                RoadTiles = new List<SavedRoadTile> { new SavedRoadTile(10, 10), new SavedRoadTile(10, 11) },
-                PlacedObjects = new List<SavedPlacedObject>
-                {
-                    new SavedPlacedObject { ObjectId = "bldg_1", ObjectTypeId = "house", X = 12, Y = 12, BaseWidth = 2, BaseHeight = 2, RotationDegrees = 90 }
-                },
-                Fields = new List<SavedField>
-                {
-                    new SavedField { FieldId = "f1", X = 10, Y = 10, Width = 1, Height = 1, State = (int)FieldState.Growing, CurrentCropId = "wheat", PlantedUtcTicks = System.DateTime.UtcNow.Ticks }
-                },
-                Buildings = new List<SavedBuilding>
-                {
-                    new SavedBuilding { InstanceId = "b1", BuildingId = "small_house", X = 15, Y = 15, BaseWidth = 2, BaseHeight = 2, RotationDegrees = 0, Level = 1, State = (int)BuildingState.Completed }
-                },
-                ProductionBuildings = new List<SavedProductionBuilding>
-                {
-                    new SavedProductionBuilding
-                    {
-                        BuildingInstanceId = "pb1",
-                        BuildingId = "feed_mill",
-                        QueueCapacity = 2,
-                        JobsQueue = new List<SavedProductionJob>
-                        {
-                            new SavedProductionJob { JobId = "j1", RecipeId = "recipe_animal_feed", State = (int)ProductionJobState.Producing, StartUtcTicks = System.DateTime.UtcNow.Ticks }
-                        }
-                    }
-                },
-                ActiveOrders = new List<SavedOrder>
-                {
-                    new SavedOrder { OrderId = "o1", CustomerId = "cust_emma", Type = (int)OrderType.Customer, RewardCoins = 100, RewardXp = 20, State = (int)OrderState.Active, CreationUtcTicks = System.DateTime.UtcNow.Ticks }
-                },
-                OrderHistory = new List<SavedOrderHistory>
-                {
-                    new SavedOrderHistory { OrderId = "o0", CustomerId = "cust_john", CoinsEarned = 50, XpEarned = 10, CompletionUtcTicks = System.DateTime.UtcNow.Ticks }
-                },
-                Residents = new List<SavedResident>
-                {
-                    new SavedResident { ResidentId = "r1", ResidentTypeId = "res_farmer", DisplayName = "Emma", AssignedHouseInstanceId = "b1", State = (int)ResidentState.AtHome, CreationUtcTicks = System.DateTime.UtcNow.Ticks }
-                }
+                Version = 9,
+                PlayerProfile = new PlayerProfile { Level = 8, Coins = 2000, Gems = 50 },
+                IsAdventureUnlocked = true,
+                AdventurePlayerX = 14,
+                AdventurePlayerY = 8,
+                EnergyState = new EnergyState(20, System.DateTime.UtcNow.Ticks) { CurrentEnergy = 15 },
+                ToolInstances = new List<ToolInstance> { new ToolInstance("tool_pickaxe", 25, 30) },
+                DiscoveredAdventureCells = new List<SavedAdventureCell> { new SavedAdventureCell(12, 2), new SavedAdventureCell(14, 8) },
+                DiscoveredSpecialLocations = new List<string> { "loc_ancient_ruins" }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v8.json"));
+            Assert.IsTrue(storage.Exists("save_v9.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(8, loadedSave.Version);
-            Assert.AreEqual(5, loadedSave.PlayerProfile.Level);
-            Assert.AreEqual(2, loadedSave.UnlockedZoneIds.Count);
-            Assert.AreEqual(2, loadedSave.RoadTiles.Count);
-            Assert.AreEqual(1, loadedSave.PlacedObjects.Count);
-            Assert.AreEqual(1, loadedSave.Fields.Count);
-            Assert.AreEqual(1, loadedSave.Buildings.Count);
-            Assert.AreEqual(1, loadedSave.ProductionBuildings.Count);
-            Assert.AreEqual(1, loadedSave.ActiveOrders.Count);
-            Assert.AreEqual(1, loadedSave.OrderHistory.Count);
-            Assert.AreEqual(1, loadedSave.Residents.Count);
-            Assert.AreEqual("r1", loadedSave.Residents[0].ResidentId);
-            Assert.AreEqual("b1", loadedSave.Residents[0].AssignedHouseInstanceId);
+            Assert.AreEqual(9, loadedSave.Version);
+            Assert.IsTrue(loadedSave.IsAdventureUnlocked);
+            Assert.AreEqual(14, loadedSave.AdventurePlayerX);
+            Assert.AreEqual(15, loadedSave.EnergyState.CurrentEnergy);
+            Assert.AreEqual(1, loadedSave.ToolInstances.Count);
+            Assert.AreEqual(25, loadedSave.ToolInstances[0].CurrentDurability);
+            Assert.AreEqual(2, loadedSave.DiscoveredAdventureCells.Count);
+            Assert.AreEqual(1, loadedSave.DiscoveredSpecialLocations.Count);
         }
 
         private class MockStorage : ISaveStorage

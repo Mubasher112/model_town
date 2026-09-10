@@ -259,6 +259,17 @@ namespace Game.Data
             {
                 "small_fountain",
                 new BuildingConfig("small_fountain", "Small Fountain", "A peaceful water fountain.", BuildingCategory.Decoration, 2, 2, 150, 10f, unlockLevel: 2, xpReward: 15, happinessBonus: 5, requiresRoadAccess: false)
+            },
+            {
+                "small_workshop",
+                new BuildingConfig("small_workshop", "Small Workshop", "Crafts specialized goods using raw materials gathered from adventure areas.", BuildingCategory.Production, 3, 3, 250, 30f, unlockLevel: 3, xpReward: 25, requiresRoadAccess: true)
+                {
+                    RequiredMaterials = new List<RecipeIngredient>
+                    {
+                        new RecipeIngredient("item_wood", 10),
+                        new RecipeIngredient("item_stone", 5)
+                    }
+                }
             }
         };
 
@@ -483,6 +494,20 @@ namespace Game.Data
                     xpReward: 20,
                     unlockLevel: 4,
                     new List<RecipeIngredient> { new RecipeIngredient("item_animal_feed", 2) }
+                )
+            },
+            {
+                "recipe_brick",
+                new RecipeConfig(
+                    "recipe_brick",
+                    "Brick",
+                    "bakery",
+                    "item_brick",
+                    outputQuantity: 1,
+                    productionTimeSeconds: 25f,
+                    xpReward: 12,
+                    unlockLevel: 3,
+                    new List<RecipeIngredient> { new RecipeIngredient("item_clay", 3) }
                 )
             }
         };

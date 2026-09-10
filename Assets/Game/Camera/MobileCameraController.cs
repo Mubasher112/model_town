@@ -33,6 +33,13 @@ namespace Game.Camera
             maxBounds = new Vector2(Mathf.Max(minWorld.x, maxWorld.x) + 5f, Mathf.Max(minWorld.y, maxWorld.y) + 5f);
         }
 
+        public void SetCustomBounds(Vector2 min, Vector2 max)
+        {
+            minBounds = min;
+            maxBounds = max;
+            ClampTargetPosition();
+        }
+
         private void Start()
         {
             _targetPosition = transform.position;

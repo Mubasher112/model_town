@@ -8,6 +8,7 @@ using Game.Residents;
 using Game.Inventory;
 using Game.Economy;
 using Game.Save;
+using Game.Adventure;
 
 namespace Game.UI
 {
@@ -25,6 +26,7 @@ namespace Game.UI
         private OrderManager _orderManager;
         private PopulationManager _populationManager;
         private BuildingAccessibilityService _accessibilityService;
+        private AdventureManager _adventureManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -42,7 +44,8 @@ namespace Game.UI
             ProductionManager productionManager = null,
             OrderManager orderManager = null,
             PopulationManager populationManager = null,
-            BuildingAccessibilityService accessibilityService = null)
+            BuildingAccessibilityService accessibilityService = null,
+            AdventureManager adventureManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -57,6 +60,24 @@ namespace Game.UI
             _orderManager = orderManager;
             _populationManager = populationManager;
             _accessibilityService = accessibilityService;
+            _adventureManager = adventureManager;
+        }
+
+        public void DevUnlockAdventure() => _adventureManager?.DevUnlockAdventure();
+        public void DevRevealAdventureMap() => _adventureManager?.DevRevealAllMap();
+        public void DevClearAdventureObstacles() => _adventureManager?.DevClearAllObstacles();
+        public void DevRefillAdventureEnergy() => _adventureManager?.EnergyManager?.RefillEnergy();
+        public void DevGiveAdventureResources()
+        {
+            if (_inventoryManager != null)
+            {
+                _inventoryManager.AddItem("item_stone", "Stone", ItemType.RawMaterial, 30);
+                _inventoryManager.AddItem("item_wood", "Wood", ItemType.RawMaterial, 30);
+                _inventoryManager.AddItem("item_clay", "Clay", ItemType.RawMaterial, 20);
+                _inventoryManager.AddItem("item_ore", "Iron Ore", ItemType.RawMaterial, 10);
+                _inventoryManager.AddItem("item_rare_crystal", "Rare Crystal", ItemType.RawMaterial, 5);
+                _inventoryManager.AddItem("item_brick", "Brick", ItemType.ManufacturedGood, 10);
+            }
         }
 
         public void ToggleDevMenu()
