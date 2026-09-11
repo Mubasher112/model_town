@@ -270,6 +270,10 @@ namespace Game.Data
                         new RecipeIngredient("item_stone", 5)
                     }
                 }
+            },
+            {
+                "town_market",
+                new BuildingConfig("town_market", "Town Market", "Central marketplace acting as primary destination for customer deliveries.", BuildingCategory.Community, 3, 3, 300, 30f, unlockLevel: 2, xpReward: 30, happinessBonus: 8, requiresRoadAccess: true)
             }
         };
 
