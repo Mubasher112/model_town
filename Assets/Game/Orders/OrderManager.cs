@@ -31,6 +31,7 @@ namespace Game.Orders
         public int MaxHistoryEntries { get; set; } = 20;
 
         public event Action OnOrdersUpdated;
+        public event Action<OrderInstance> OnOrderCompleted;
         public event Action<string> OnNotificationMessage;
 
         public OrderManager(
@@ -192,6 +193,7 @@ namespace Game.Orders
             EnsureMinimumOrders();
 
             OnNotificationMessage?.Invoke($"Order Complete! +{targetOrder.Reward.Coins} Coins, +{targetOrder.Reward.Xp} XP");
+            OnOrderCompleted?.Invoke(targetOrder);
             OnOrdersUpdated?.Invoke();
 
             return OrderOperationResult.Success;

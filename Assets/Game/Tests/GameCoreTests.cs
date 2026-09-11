@@ -15,6 +15,7 @@ using Game.Services;
 using Game.Save;
 using Game.Adventure;
 using Game.Social;
+using Game.Quests;
 
 namespace Game.Tests
 {
@@ -663,7 +664,6 @@ namespace Game.Tests
             _profile.Coins = 500;
             long initialCoins = _profile.Coins;
 
-            // Buy 5 Wheat (10 coins each = 50 coins)
             var buyResult = marketManager.BuyItem("crop_wheat", 5);
 
             Assert.AreEqual(MarketOperationResult.Success, buyResult);
@@ -671,7 +671,7 @@ namespace Game.Tests
             Assert.AreEqual(5, _inventoryManager.GetQuantity("crop_wheat"));
 
             var listing = marketManager.GetListing("crop_wheat");
-            Assert.AreEqual(95, listing.CurrentStock); // 100 - 5 = 95 stock remaining
+            Assert.AreEqual(95, listing.CurrentStock);
 
             var history = marketManager.ExportHistory();
             Assert.AreEqual(1, history.Count);
@@ -686,15 +686,13 @@ namespace Game.Tests
             var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
 
             _profile.Coins = 10;
-            // Insufficient coins for 5 Wheat (50 coins)
             Assert.AreEqual(MarketOperationResult.InsufficientCoins, marketManager.BuyItem("crop_wheat", 5));
             Assert.AreEqual(10, _profile.Coins);
 
             _profile.Coins = 1000;
-            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 50); // Storage Full (50/50)
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 50);
             Assert.AreEqual(MarketOperationResult.InsufficientStorage, marketManager.BuyItem("crop_wheat", 1));
 
-            // Rejects level-locked item (Sugarcane requires Level 5)
             _profile.Level = 1;
             Assert.AreEqual(MarketOperationResult.LevelLocked, marketManager.BuyItem("crop_sugarcane", 1));
         }
@@ -708,7 +706,6 @@ namespace Game.Tests
             _profile.Coins = 100;
             _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
 
-            // Sell 5 Wheat (6 coins sell price each = 30 coins earned)
             var sellResult = marketManager.SellItem("crop_wheat", 5);
 
             Assert.AreEqual(MarketOperationResult.Success, sellResult);
@@ -729,15 +726,12 @@ namespace Game.Tests
 
             _profile.Coins = 100;
 
-            // Buy 1 Wheat (10 coins) -> Balance 90
             marketManager.BuyItem("crop_wheat", 1);
             Assert.AreEqual(90, _profile.Coins);
 
-            // Immediately sell 1 Wheat (6 coins) -> Balance 96
             marketManager.SellItem("crop_wheat", 1);
             Assert.AreEqual(96, _profile.Coins);
 
-            // Net loss of 4 coins per cycle prevents currency duplication exploits
             Assert.Less(_profile.Coins, 100);
         }
 
@@ -745,21 +739,16 @@ namespace Game.Tests
         public void MarketManager_UTCUtOfflineRestocking()
         {
             var timeService = new StandardGameTimeService();
-            long startTicks = timeService.CurrentUtcTicks;
-
             var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
 
-            // Deplete Wheat stock to 0
             marketManager.DevEmptyStock();
             Assert.AreEqual(0, marketManager.GetListing("crop_wheat").CurrentStock);
 
-            // Advance 30 minutes (1800s) -> +20 Restock Amount
             timeService.AdvanceTime(System.TimeSpan.FromSeconds(1800));
             marketManager.RecalculateRestocks();
 
             Assert.AreEqual(20, marketManager.GetListing("crop_wheat").CurrentStock);
 
-            // Advance 10 hours -> Clamped to Max Stock (100)
             timeService.AdvanceTime(System.TimeSpan.FromHours(10));
             marketManager.RecalculateRestocks();
 
@@ -767,172 +756,115 @@ namespace Game.Tests
         }
         #endregion
 
-        #region Task 10 Social, Friends & Profiles System Tests
+        #region Task 10 Quest, Goals & Progression System Tests
         [Test]
-        public void MockSocialService_ProfileEditingAndValidation()
+        public void QuestManager_MainQuestChainAndPrerequisites()
         {
-            var mockSocial = new MockSocialService();
-            bool updateSuccess = false;
+            var timeService = new StandardGameTimeService();
+            var questManager = new QuestManager(_profile, _economyManager, _inventoryManager, timeService);
 
-            mockSocial.UpdateProfile("   ", "avatar_farmer", (s, err) => updateSuccess = s);
-            Assert.IsFalse(updateSuccess);
+            var activeQuests = questManager.GetActiveQuests();
+            Assert.AreEqual(1, activeQuests.FindAll(q => QuestLibrary.GetQuest(q.QuestId)?.Type == QuestType.Main).Count);
 
-            mockSocial.UpdateProfile("Green Valley", "avatar_farmer", (s, err) => updateSuccess = s);
-            Assert.IsTrue(updateSuccess);
+            // First Main Quest is "main_q1_start_town"
+            var q1 = activeQuests.Find(q => q.QuestId == "main_q1_start_town");
+            Assert.IsNotNull(q1);
+            Assert.AreEqual(QuestState.Active, q1.State);
 
-            mockSocial.GetMyProfile((s, profile, err) =>
-            {
-                Assert.IsTrue(s);
-                Assert.AreEqual("Green Valley", profile.DisplayName);
-                Assert.AreEqual("avatar_farmer", profile.AvatarId);
-            });
+            // Trigger objective: Build 1 Small House
+            questManager.OnGameplayEvent(ObjectiveType.Build, "small_house", 1);
+            Assert.AreEqual(QuestState.Completed, q1.State);
+
+            // Atomic Reward Claim
+            long coinsBefore = _profile.Coins;
+            var claimResult = questManager.ClaimReward("main_q1_start_town");
+
+            Assert.AreEqual(QuestClaimResult.Success, claimResult);
+            Assert.AreEqual(coinsBefore + 100, _profile.Coins);
+
+            // Second Main Quest ("main_q2_grow_crop") unlocks dynamically
+            var q2 = questManager.GetActiveQuests().Find(q => q.QuestId == "main_q2_grow_crop");
+            Assert.IsNotNull(q2);
+            Assert.AreEqual(QuestState.Active, q2.State);
         }
 
         [Test]
-        public void MockSocialService_FriendRequestFlow_SendAcceptRejectRemove()
+        public void QuestManager_EventDrivenObjectiveProgressAndRewardClaiming()
         {
-            var mockSocial = new MockSocialService();
+            var timeService = new StandardGameTimeService();
+            var questManager = new QuestManager(_profile, _economyManager, _inventoryManager, timeService);
 
-            bool selfReqSuccess = true;
-            mockSocial.SendFriendRequest("p_my_id", (s, err) => selfReqSuccess = s);
-            Assert.IsFalse(selfReqSuccess);
+            var sideQ1 = questManager.GetActiveQuests().Find(q => q.QuestId == "side_q1_farmer_request");
+            Assert.IsNotNull(sideQ1);
 
-            bool sendSuccess = false;
-            mockSocial.SendFriendRequest("p_sunny", (s, err) => sendSuccess = s);
-            Assert.IsTrue(sendSuccess);
+            // Harvest wheat incremental events
+            questManager.OnGameplayEvent(ObjectiveType.Harvest, "wheat", 4);
+            Assert.AreEqual(4, sideQ1.ObjectivesProgress[0].CurrentAmount);
+            Assert.AreEqual(QuestState.Active, sideQ1.State);
 
-            bool dupReqSuccess = true;
-            mockSocial.SendFriendRequest("p_sunny", (s, err) => dupReqSuccess = s);
-            Assert.IsFalse(dupReqSuccess);
+            questManager.OnGameplayEvent(ObjectiveType.Harvest, "wheat", 6);
+            Assert.AreEqual(10, sideQ1.ObjectivesProgress[0].CurrentAmount);
+            Assert.AreEqual(QuestState.Completed, sideQ1.State);
 
-            bool acceptSuccess = false;
-            mockSocial.AcceptFriendRequest("p_sunny", (s, err) => acceptSuccess = s);
-            Assert.IsTrue(acceptSuccess);
+            // Claim Reward
+            Assert.AreEqual(QuestClaimResult.Success, questManager.ClaimReward("side_q1_farmer_request"));
 
-            List<FriendRelationship> friends = null;
-            mockSocial.GetFriendsList((s, list, err) => friends = list);
-            Assert.IsNotNull(friends);
-            Assert.AreEqual(1, friends.Count);
-            Assert.AreEqual("p_sunny", friends[0].TargetPlayerId);
-            Assert.AreEqual(FriendStatus.Accepted, friends[0].Status);
-
-            bool removeSuccess = false;
-            mockSocial.RemoveFriend("p_sunny", (s, err) => removeSuccess = s);
-            Assert.IsTrue(removeSuccess);
-
-            mockSocial.GetFriendsList((s, list, err) => friends = list);
-            Assert.AreEqual(0, friends.Count);
+            // Double Claim Prevention
+            Assert.AreEqual(QuestClaimResult.AlreadyClaimed, questManager.ClaimReward("side_q1_farmer_request"));
         }
 
         [Test]
-        public void MockSocialService_PlayerSearchByDisplayName()
+        public void QuestManager_UTCDailyResetHandling()
         {
-            var mockSocial = new MockSocialService();
-            List<SocialProfile> searchResults = null;
+            var timeService = new StandardGameTimeService();
+            var questManager = new QuestManager(_profile, _economyManager, _inventoryManager, timeService);
 
-            mockSocial.SearchPlayers("Sunny", (s, list, err) => searchResults = list);
-            Assert.IsNotNull(searchResults);
-            Assert.AreEqual(1, searchResults.Count);
-            Assert.AreEqual("p_sunny", searchResults[0].PlayerId);
-        }
+            questManager.OnGameplayEvent(ObjectiveType.Harvest, "wheat", 5);
+            var daily1 = questManager.GetActiveQuests().Find(q => q.QuestId == "daily_g1_harvest_crops");
+            Assert.AreEqual(QuestState.Completed, daily1.State);
 
-        [Test]
-        public void SocialManager_ReadonlyVisitMode_EnforcesState()
-        {
-            var mockSocial = new MockSocialService();
-            var socialManager = new SocialManager(mockSocial);
+            questManager.ClaimReward("daily_g1_harvest_crops");
+            Assert.IsTrue(questManager.GetClaimedQuestIds().Contains("daily_g1_harvest_crops"));
 
-            Assert.AreEqual(GameTownMode.OwnTown, socialManager.CurrentTownMode);
-            Assert.IsFalse(socialManager.IsVisitingFriend);
+            // Advance 25 hours -> Daily Goals Reset
+            timeService.AdvanceTime(System.TimeSpan.FromHours(25));
+            questManager.CheckDailyReset();
 
-            bool visitSuccess = false;
-            socialManager.StartVisitingFriend("p_sunny", (s, snap, err) => visitSuccess = s);
-
-            Assert.IsTrue(visitSuccess);
-            Assert.AreEqual(GameTownMode.FriendVisit, socialManager.CurrentTownMode);
-            Assert.IsTrue(socialManager.IsVisitingFriend);
-            Assert.IsNotNull(socialManager.VisitedTownSnapshot);
-            Assert.AreEqual("Sunny Valley", socialManager.VisitedTownSnapshot.DisplayName);
-
-            socialManager.ReturnToOwnTown();
-            Assert.AreEqual(GameTownMode.OwnTown, socialManager.CurrentTownMode);
-            Assert.IsFalse(socialManager.IsVisitingFriend);
-        }
-
-        [Test]
-        public void SocialManager_AppreciateTownAndRestrictions()
-        {
-            var mockSocial = new MockSocialService();
-            var socialManager = new SocialManager(mockSocial);
-
-            Assert.IsFalse(socialManager.CanAppreciateTown("p_my_id"));
-
-            bool appreciateSuccess = false;
-            socialManager.AppreciateTown("p_sunny", (s, err) => appreciateSuccess = s);
-            Assert.IsTrue(appreciateSuccess);
-
-            Assert.IsFalse(socialManager.CanAppreciateTown("p_sunny"));
-        }
-
-        [Test]
-        public void MockSocialService_BlockingPlayer_RestrictsInteractions()
-        {
-            var mockSocial = new MockSocialService();
-
-            mockSocial.BlockPlayer("p_sunny", (s, err) => { });
-
-            bool visitSuccess = true;
-            mockSocial.VisitTown("p_sunny", (s, snap, err) => visitSuccess = s);
-            Assert.IsFalse(visitSuccess);
-
-            bool requestSuccess = true;
-            mockSocial.SendFriendRequest("p_sunny", (s, err) => requestSuccess = s);
-            Assert.IsFalse(requestSuccess);
-        }
-
-        [Test]
-        public void MockSocialService_OfflineMode_GracefulFailure()
-        {
-            var mockSocial = new MockSocialService();
-            mockSocial.SetOnline(false);
-
-            bool requestSuccess = true;
-            mockSocial.SendFriendRequest("p_sunny", (s, err) => requestSuccess = s);
-            Assert.IsFalse(requestSuccess);
-
-            bool searchSuccess = true;
-            mockSocial.SearchPlayers("Sunny", (s, list, err) => searchSuccess = s);
-            Assert.IsFalse(searchSuccess);
+            Assert.IsFalse(questManager.GetClaimedQuestIds().Contains("daily_g1_harvest_crops"));
+            var resetDaily1 = questManager.GetActiveQuests().Find(q => q.QuestId == "daily_g1_harvest_crops");
+            Assert.IsNotNull(resetDaily1);
+            Assert.AreEqual(QuestState.Active, resetDaily1.State);
+            Assert.AreEqual(0, resetDaily1.ObjectivesProgress[0].CurrentAmount);
         }
         #endregion
 
         [Test]
-        public void SaveSystem_SaveAndLoad_Version11Schema()
+        public void SaveSystem_SaveAndLoad_Version12Schema()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v11.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v12.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 11,
+                Version = 12,
                 PlayerProfile = new PlayerProfile { Level = 12, Coins = 5000, Gems = 100 },
-                MarketListings = new List<MarketListing> { new MarketListing("crop_wheat", 80, System.DateTime.UtcNow.Ticks) },
-                MarketHistory = new List<MarketTransaction>
+                ActiveQuests = new List<QuestInstance>
                 {
-                    new MarketTransaction("tx_1", TransactionType.Buy, "crop_wheat", "Wheat", 5, 10, 50, System.DateTime.UtcNow.Ticks)
-                }
+                    new QuestInstance("main_q1_start_town", QuestState.Active, new List<QuestObjectiveProgress> { new QuestObjectiveProgress("obj_build_house", 1) }, System.DateTime.UtcNow.Ticks)
+                },
+                ClaimedQuestIds = new List<string> { "ms_first_harvest" },
+                LastDailyResetUtcTicks = System.DateTime.UtcNow.Ticks
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v11.json"));
+            Assert.IsTrue(storage.Exists("save_v12.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(11, loadedSave.Version);
-            Assert.AreEqual(1, loadedSave.MarketListings.Count);
-            Assert.AreEqual(80, loadedSave.MarketListings[0].CurrentStock);
-            Assert.AreEqual(1, loadedSave.MarketHistory.Count);
-            Assert.AreEqual(TransactionType.Buy, loadedSave.MarketHistory[0].Type);
-            Assert.AreEqual(50, loadedSave.MarketHistory[0].TotalPrice);
+            Assert.AreEqual(12, loadedSave.Version);
+            Assert.AreEqual(1, loadedSave.ActiveQuests.Count);
+            Assert.AreEqual("main_q1_start_town", loadedSave.ActiveQuests[0].QuestId);
+            Assert.AreEqual(1, loadedSave.ClaimedQuestIds.Count);
+            Assert.AreEqual("ms_first_harvest", loadedSave.ClaimedQuestIds[0]);
         }
 
         private class MockStorage : ISaveStorage

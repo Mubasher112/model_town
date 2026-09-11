@@ -159,7 +159,7 @@ namespace Game.Save
     [Serializable]
     public class SaveData
     {
-        public int Version = 11;
+        public int Version = 12;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -195,6 +195,11 @@ namespace Game.Save
         // Market Persistence Fields (v11)
         public List<MarketListing> MarketListings = new List<MarketListing>();
         public List<MarketTransaction> MarketHistory = new List<MarketTransaction>();
+
+        // Quest Persistence Fields (v12)
+        public List<QuestInstance> ActiveQuests = new List<QuestInstance>();
+        public List<string> ClaimedQuestIds = new List<string>();
+        public long LastDailyResetUtcTicks = 0;
     }
 
     public interface ISaveStorage
@@ -207,7 +212,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 11;
+        public const int CurrentSaveVersion = 12;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -312,7 +317,10 @@ namespace Game.Save
                 ClaimedGiftIds = new List<string>(),
                 AppreciatedPlayerIds = new List<string>(),
                 MarketListings = new List<MarketListing>(),
-                MarketHistory = new List<MarketTransaction>()
+                MarketHistory = new List<MarketTransaction>(),
+                ActiveQuests = new List<QuestInstance>(),
+                ClaimedQuestIds = new List<string>(),
+                LastDailyResetUtcTicks = DateTime.UtcNow.Ticks
             };
             Save(data);
             return data;
@@ -392,6 +400,13 @@ namespace Game.Save
             {
                 if (data.MarketListings == null) data.MarketListings = new List<MarketListing>();
                 if (data.MarketHistory == null) data.MarketHistory = new List<MarketTransaction>();
+            }
+
+            if (data.Version < 12)
+            {
+                if (data.ActiveQuests == null) data.ActiveQuests = new List<QuestInstance>();
+                if (data.ClaimedQuestIds == null) data.ClaimedQuestIds = new List<string>();
+                if (data.LastDailyResetUtcTicks <= 0) data.LastDailyResetUtcTicks = DateTime.UtcNow.Ticks;
             }
 
             data.Version = CurrentSaveVersion;

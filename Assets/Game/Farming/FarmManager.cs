@@ -28,6 +28,8 @@ namespace Game.Farming
         private readonly StandardGameTimeService _timeService;
 
         public event Action<FieldInstance> OnFieldStateChanged;
+        public event Action<string, int> OnCropPlanted;
+        public event Action<string, int> OnCropHarvested;
         public event Action<string> OnNotificationMessage;
 
         public FarmManager(InventoryManager inventoryManager, PlayerProfile playerProfile, StandardGameTimeService timeService)
@@ -126,6 +128,7 @@ namespace Game.Farming
             field.State = FieldState.Planted;
 
             OnFieldStateChanged?.Invoke(field);
+            OnCropPlanted?.Invoke(cropId, 1);
             OnNotificationMessage?.Invoke($"{crop.Name} planted!");
             return FarmingOperationResult.Success;
         }
@@ -156,11 +159,13 @@ namespace Game.Farming
 
             _playerProfile.AddXP(crop.HarvestXp);
 
+            string harvestedCropId = field.CurrentCropId;
             field.State = FieldState.Empty;
             field.CurrentCropId = null;
             field.PlantedUtcTicks = 0;
 
             OnFieldStateChanged?.Invoke(field);
+            OnCropHarvested?.Invoke(harvestedCropId, crop.HarvestQuantity);
             OnNotificationMessage?.Invoke($"Harvested +{crop.HarvestQuantity} {crop.Name} (+{crop.HarvestXp} XP)");
             return FarmingOperationResult.Success;
         }

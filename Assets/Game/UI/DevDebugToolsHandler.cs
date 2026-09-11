@@ -11,6 +11,7 @@ using Game.Save;
 using Game.Adventure;
 using Game.Social;
 using Game.Services;
+using Game.Quests;
 
 namespace Game.UI
 {
@@ -32,6 +33,7 @@ namespace Game.UI
         private SocialManager _socialManager;
         private ISocialService _socialService;
         private MarketManager _marketManager;
+        private QuestManager _questManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -53,7 +55,8 @@ namespace Game.UI
             AdventureManager adventureManager = null,
             SocialManager socialManager = null,
             ISocialService socialService = null,
-            MarketManager marketManager = null)
+            MarketManager marketManager = null,
+            QuestManager questManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -72,7 +75,11 @@ namespace Game.UI
             _socialManager = socialManager;
             _socialService = socialService;
             _marketManager = marketManager;
+            _questManager = questManager;
         }
+
+        public void DevCompleteQuestObjective(string questId) => _questManager?.DevCompleteObjective(questId);
+        public void DevClaimQuestReward(string questId) => _questManager?.DevClaimReward(questId);
 
         public void DevRestockAllMarket() => _marketManager?.DevRestockAll();
         public void DevEmptyMarketStock() => _marketManager?.DevEmptyStock();

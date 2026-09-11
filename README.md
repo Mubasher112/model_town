@@ -21,7 +21,7 @@ Assets/Game/
 ├── Buildings/   # BuildingInstance, BuildingManager, BuildingStates, BuildingAccessibilityService
 ├── Camera/      # Mobile camera controller (Pan, Pinch-to-zoom, bounds switching)
 ├── Core/        # GameManager and Bootstrap initialization
-├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData, SocialData, MarketData)
+├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData, SocialData, MarketData, QuestData)
 ├── Economy/     # EconomyManager, MarketManager for centralized coin/gem/XP & market transactions
 ├── Farming/     # FarmManager, FieldInstance, CropGrowthSystem, FieldStates
 ├── Input/       # MobileInputManager supporting Tap, Drag, Pinch, Long Press
@@ -30,12 +30,13 @@ Assets/Game/
 ├── Platforms/   # PlatformServiceFactory and Platform implementations
 ├── Player/      # PlayerProfile (Level, XP, Coins, Gems)
 ├── Production/  # ProductionManager, ProductionJob, ProductionBuildingInstance, ProductionStates
+├── Quests/      # QuestManager (Main, Side, Daily, Milestone quest tracking)
 ├── Residents/   # PopulationManager, HappinessManager, ResidentInstance, HappinessModifier, PopulationStats
-├── Save/        # LocalSaveSystem (Versioned JSON save v11, corruption recovery)
+├── Save/        # LocalSaveSystem (Versioned JSON save v12, corruption recovery)
 ├── Services/    # EnergyManager, ToolService, ExplorationService, MockSocialService, ISocialService, ILeaderboardService
 ├── Social/      # SocialManager (TownMode transitions, Read-Only Visit Mode, Appreciations, Gifts)
 ├── Tests/       # Automated NUnit test suite & Assembly Definition
-├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, SocialUIController, MarketUIController, DevDebugToolsHandler
+├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, SocialUIController, MarketUIController, QuestUIController, DevDebugToolsHandler
 └── World/       # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer, ResidentWorldRenderer
 ```
 
@@ -44,58 +45,60 @@ Assets/Game/
 ## 3. Core Gameplay Loop Integration
 
 ```
-Farm & Mine → Produce Goods → Trade at Town Market → Earn Coins → Expand Town & Connect Socially
+Build & Farm → Produce & Trade → Complete Orders → Complete Quests → Unlock & Expand
 ```
 
 1. **Farming & Adventure**: Harvest Wheat, Corn, Carrots, Sugarcane, Tomatoes, or gather Wood, Stone, Clay, Ore, Crystals.
-2. **Production**: Process raw goods into manufactured products (Flour, Bread, Animal Feed, Sugar, Milk, Bricks).
-3. **Town Market & Economy**: Buy missing resources or sell surplus products at the Town Market.
-4. **Orders & Delivery**: Fulfill customer orders via the Town Market delivery location.
-5. **Expansion & Social**: Expand town land, build housing/facilities, and interact with friends.
+2. **Production & Market**: Process raw goods into manufactured products and trade at the Town Market.
+3. **Orders & Deliveries**: Fulfill customer orders to earn coins, experience, and quest progress.
+4. **Quests & Progression**: Follow the Main Quest Chain (Start Your Town → Grow a Crop → Start Production → Serve a Customer → Grow the Town), complete Side Quests, Daily Goals, and Milestones.
+5. **Land & Population**: Expand town boundaries, construct housing/facilities, and interact with friends.
 
 ---
 
-## 4. Market & Trading Economy Architecture
+## 4. Quests, Goals & Progression System
 
-### Town Market Building Integration
-- **Town Market Building**: Placeable/constructible community building (`town_market`) that acts as the central interface for buying resources, selling products, viewing market stock, and tracking transaction history.
+### Quest Chains & Prerequisites
+- **Main Quest Chain**: Guides early gameplay step-by-step (`Start Your Town` → `Grow Your First Crop` → `Start Production` → `Serve a Customer` → `Grow the Town`).
+- **Chain Dependencies**: Subsequent quests stay locked until all prerequisite quests are completed and claimed.
+- **Quest Categories**: Supports Main, Side, Daily, and Milestone quest categories.
 
-### Buy & Sell System Rules
-- **Buy System**: Validates player level unlock, available market stock, inventory storage capacity, and coin balance before atomically deducting coins and adding items.
-- **Sell System**: Validates player inventory ownership and level requirements before atomically removing items and adding coins.
-- **Price Spread Safety**: Buy prices are set higher than sell prices (e.g., Buy Wheat: 10 Coins, Sell Wheat: 6 Coins) to prevent infinite currency creation loops.
-- **Double-Tap Protection**: UI actions flag active transactions to prevent rapid double-tapping from executing duplicate purchases or sales.
+### Event-Driven Objective Tracking
+- **Objective Types**: Supports `Build`, `Upgrade`, `Plant`, `Harvest`, `Produce`, `Collect`, `Sell`, `Buy`, `Deliver`, `Population`, `Happiness`, and `Expansion` objective types.
+- **Event Updates**: Gameplay actions trigger event updates (`OnGameplayEvent`) on active objectives rather than polling every frame.
 
-### Timestamp-Based Offline Restocking
-- **Stock Limits**: Items have configurable max stocks (e.g., Wheat max 100, Bread max 40).
-- **UTC Offline Calculation**: Market stock regenerates over real-world time (e.g., +20 Wheat every 30 minutes) using UTC timestamps. Stock recalculates smoothly when the player returns offline.
+### Atomic Reward Claiming & Storage Validation
+- **Claim Flow**: `Completed` quests present a `CLAIM REWARD` action button.
+- **Storage Protection**: If quest rewards include items and inventory is full, the claim is blocked with an informative message ("Storage is full! Free storage to claim reward.") without losing items.
+- **Daily Reset**: Daily Goals reset every 24 hours based on UTC timestamps (`LastDailyResetUtcTicks`).
 
 ---
 
-## 5. Save System Schema (Version 11)
+## 5. Save System Schema (Version 12)
 
-The save system supports automatic migration up to `SaveDataVersion = 11` (`save_v11.json`):
+The save system supports automatic migration up to `SaveDataVersion = 12` (`save_v12.json`):
 - Player Profile & Unlocked Zone IDs
 - World Objects, Fields, Buildings, Roads
 - Production Building Queues & Order History
 - Resident Instances & Housing Assignments
 - Adventure Grid, Energy State, Tool Durabilities
 - Local Social Profile, Cached Friends, Blocked Players, Appreciated Towns
-- **Market Stock Listings & Last Restock UTC Timestamps**
-- **Market Transaction History Log**
+- Market Stock Listings & Transaction History
+- **Active Quests & Objective Progress**
+- **Claimed Quest IDs Log**
+- **Last UTC Daily Reset Ticks**
 
 ---
 
 ## 6. Development & Debug Tools
-`DevDebugToolsHandler` provides market debug shortcuts:
-- **Restock All Market**: Instantly refills all market items to max stock.
-- **Empty Market Stock**: Clears all market stock for testing stock depletion.
-- **Clear Market History**: Resets transaction history logs.
+`DevDebugToolsHandler` provides quest debug shortcuts:
+- **Dev Complete Quest Objective**: Instantly completes all objectives for a specified quest.
+- **Dev Claim Quest Reward**: Instantly claims rewards for a completed quest.
 
 ---
 
 ## 7. Running Automated Tests
-Run all 65 automated unit tests directly via .NET CLI:
+Run all 68 automated unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```

@@ -35,6 +35,8 @@ namespace Game.Economy
         public int MaxHistoryLimit { get; set; } = 50;
 
         public event Action OnMarketUpdated;
+        public event Action<string, int> OnItemPurchased;
+        public event Action<string, int> OnItemSold;
         public event Action<string> OnNotificationMessage;
 
         public MarketManager(
@@ -170,6 +172,7 @@ namespace Game.Economy
             RecordTransaction(TransactionType.Buy, itemId, itemName, quantity, config.BaseBuyPrice, totalCost);
 
             OnNotificationMessage?.Invoke($"Purchased {itemName} ×{quantity} for {totalCost:N0} Coins");
+            OnItemPurchased?.Invoke(itemId, quantity);
             OnMarketUpdated?.Invoke();
 
             return MarketOperationResult.Success;
@@ -215,6 +218,7 @@ namespace Game.Economy
             RecordTransaction(TransactionType.Sell, itemId, itemName, quantity, config.BaseSellPrice, totalEarnings);
 
             OnNotificationMessage?.Invoke($"Sold {itemName} ×{quantity} for +{totalEarnings:N0} Coins");
+            OnItemSold?.Invoke(itemId, quantity);
             OnMarketUpdated?.Invoke();
 
             return MarketOperationResult.Success;

@@ -16,6 +16,9 @@ using Game.Platforms;
 using Game.UI;
 using Game.Camera;
 using Game.Services;
+using Game.Adventure;
+using Game.Social;
+using Game.Quests;
 
 namespace Game.Core
 {
@@ -38,6 +41,10 @@ namespace Game.Core
         public OrderManager OrderManager { get; private set; }
         public PopulationManager PopulationManager { get; private set; }
         public HappinessManager HappinessManager { get; private set; }
+        public AdventureManager AdventureManager { get; private set; }
+        public SocialManager SocialManager { get; private set; }
+        public MarketManager MarketManager { get; private set; }
+        public QuestManager QuestManager { get; private set; }
         public LocalSaveSystem SaveSystem { get; private set; }
         public LocalMockPlatformServices PlatformServices { get; private set; }
 
@@ -51,9 +58,13 @@ namespace Game.Core
         [SerializeField] private OrdersUIController ordersUIController;
         [SerializeField] private TownOverviewUIController townOverviewUIController;
         [SerializeField] private LandExpansionUIController expansionUIController;
+        [SerializeField] private AdventureUIController adventureUIController;
+        [SerializeField] private SocialUIController socialUIController;
+        [SerializeField] private MarketUIController marketUIController;
+        [SerializeField] private QuestUIController questUIController;
         [SerializeField] private MobileCameraController cameraController;
 
-        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v8.json");
+        private string SaveFilePath => Path.Combine(Application.persistentDataPath, "player_save_v12.json");
 
         private void Awake()
         {
@@ -124,10 +135,32 @@ namespace Game.Core
                 expansionUIController.Initialize(ExpansionManager, EconomyManager, PlayerProfile, PopulationManager);
             }
 
+            if (adventureUIController != null)
+            {
+                adventureUIController.Initialize(AdventureManager);
+            }
+
+            if (socialUIController != null)
+            {
+                socialUIController.Initialize(SocialManager, PlatformServices);
+            }
+
+            if (marketUIController != null)
+            {
+                marketUIController.Initialize(MarketManager, InventoryManager);
+            }
+
+            if (questUIController != null)
+            {
+                questUIController.Initialize(QuestManager);
+            }
+
             if (devToolsHandler != null)
             {
-                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager, PopulationManager, AccessibilityService);
+                devToolsHandler.Initialize(WorldGrid, PlacementManager, RoadManager, ExpansionManager, SaveSystem, FarmManager, InventoryManager, BuildingManager, EconomyManager, ProductionManager, OrderManager, PopulationManager, AccessibilityService, AdventureManager, SocialManager, PlatformServices, MarketManager, QuestManager);
             }
+
+            BindQuestGameplayEvents();
 
             if (cameraController != null)
             {
@@ -203,6 +236,86 @@ namespace Game.Core
             if (expansionUIController != null) expansionUIController.ClosePanel();
         }
 
+        private void BindQuestGameplayEvents()
+        {
+            if (QuestManager == null) return;
+
+            if (BuildingManager != null)
+            {
+                BuildingManager.OnBuildingStateChanged += (bInstance) =>
+                {
+                    if (bInstance != null && bInstance.State == BuildingState.Completed)
+                    {
+                        QuestManager.OnGameplayEvent(ObjectiveType.Build, bInstance.BuildingId, 1);
+                    }
+                };
+            }
+
+            if (FarmManager != null)
+            {
+                FarmManager.OnCropPlanted += (cropId, qty) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Plant, cropId, qty);
+                };
+                FarmManager.OnCropHarvested += (cropId, qty) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Harvest, cropId, qty);
+                };
+            }
+
+            if (ProductionManager != null)
+            {
+                ProductionManager.OnProductionStateChanged += (prodBuilding) =>
+                {
+                    if (prodBuilding != null && prodBuilding.JobsQueue != null && prodBuilding.JobsQueue.Count > 0)
+                    {
+                        var activeJob = prodBuilding.JobsQueue[0];
+                        if (activeJob.State == ProductionJobState.Ready)
+                        {
+                            QuestManager.OnGameplayEvent(ObjectiveType.Produce, activeJob.RecipeId, 1);
+                        }
+                    }
+                };
+            }
+
+            if (OrderManager != null)
+            {
+                OrderManager.OnOrderCompleted += (order) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Deliver, null, 1);
+                };
+            }
+
+            if (MarketManager != null)
+            {
+                MarketManager.OnItemPurchased += (itemId, qty) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Buy, itemId, qty);
+                };
+                MarketManager.OnItemSold += (itemId, qty) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Sell, itemId, qty);
+                };
+            }
+
+            if (PopulationManager != null)
+            {
+                PopulationManager.OnPopulationUpdated += () =>
+                {
+                    var stats = PopulationManager.GetPopulationStats();
+                    QuestManager.OnGameplayEvent(ObjectiveType.Population, null, stats.CurrentPopulation);
+                };
+            }
+
+            if (ExpansionManager != null)
+            {
+                ExpansionManager.OnZoneUnlocked += (zone) =>
+                {
+                    QuestManager.OnGameplayEvent(ObjectiveType.Expansion, zone.ZoneId, 1);
+                };
+            }
+        }
+
         private void Update()
         {
             if (TimeService != null)
@@ -228,6 +341,11 @@ namespace Game.Core
             if (OrderManager != null)
             {
                 OrderManager.CheckAndExpireOrders();
+            }
+
+            if (QuestManager != null)
+            {
+                QuestManager.CheckDailyReset();
             }
         }
 
@@ -386,6 +504,64 @@ namespace Game.Core
                 });
             }
 
+            if (AdventureManager != null)
+            {
+                saveData.IsAdventureUnlocked = AdventureManager.IsUnlocked;
+                saveData.AdventurePlayerX = AdventureManager.PlayerPosition.x;
+                saveData.AdventurePlayerY = AdventureManager.PlayerPosition.y;
+                saveData.EnergyState = AdventureManager.EnergyManager?.ExportState();
+                saveData.ToolInstances = AdventureManager.ToolService?.ExportTools();
+                saveData.DiscoveredSpecialLocations = AdventureManager.ExportDiscoveredLocations();
+
+                saveData.DiscoveredAdventureCells = new List<SavedAdventureCell>();
+                if (AdventureManager.ExplorationService != null)
+                {
+                    foreach (var c in AdventureManager.ExplorationService.ExportDiscoveredCells())
+                    {
+                        saveData.DiscoveredAdventureCells.Add(new SavedAdventureCell(c.x, c.y));
+                    }
+                }
+
+                saveData.AdventureNodes = new List<SavedAdventureNode>();
+                foreach (var n in AdventureManager.ExportNodes())
+                {
+                    saveData.AdventureNodes.Add(new SavedAdventureNode
+                    {
+                        NodeInstanceId = n.NodeInstanceId,
+                        NodeDefId = n.NodeDefId,
+                        X = n.GridPosition.x,
+                        Y = n.GridPosition.y,
+                        State = (int)n.State,
+                        CurrentQuantity = n.CurrentQuantity,
+                        MaxQuantity = n.MaxQuantity,
+                        GatheringStartUtcTicks = n.GatheringStartUtcTicks,
+                        RespawnStartUtcTicks = n.RespawnStartUtcTicks,
+                        IsCleared = n.IsCleared
+                    });
+                }
+            }
+
+            if (SocialManager != null)
+            {
+                saveData.LocalSocialProfile = SocialManager.MyProfile;
+                saveData.CachedFriends = SocialManager.GetCachedFriends();
+                saveData.ClaimedGiftIds = SocialManager.ExportClaimedGifts();
+                saveData.AppreciatedPlayerIds = SocialManager.ExportAppreciatedPlayers();
+            }
+
+            if (MarketManager != null)
+            {
+                saveData.MarketListings = MarketManager.ExportListings();
+                saveData.MarketHistory = MarketManager.ExportHistory();
+            }
+
+            if (QuestManager != null)
+            {
+                saveData.ActiveQuests = QuestManager.GetActiveQuests();
+                saveData.ClaimedQuestIds = QuestManager.GetClaimedQuestIds();
+                saveData.LastDailyResetUtcTicks = QuestManager.LastDailyResetUtcTicks;
+            }
+
             SaveSystem.Save(saveData);
         }
 
@@ -417,6 +593,46 @@ namespace Game.Core
             ProductionManager = new ProductionManager(InventoryManager, PlayerProfile, TimeService);
             OrderManager = new OrderManager(InventoryManager, EconomyManager, PlayerProfile, TimeService);
             PopulationManager = new PopulationManager(BuildingManager, PlayerProfile, TimeService, HappinessManager);
+
+            // Restore Adventure Manager (v9)
+            var discCells = new List<Vector2Int>();
+            if (saveData.DiscoveredAdventureCells != null)
+            {
+                foreach (var c in saveData.DiscoveredAdventureCells) discCells.Add(new Vector2Int(c.X, c.Y));
+            }
+            AdventureManager = new AdventureManager(PlayerProfile, EconomyManager, InventoryManager, TimeService, saveData.EnergyState, saveData.ToolInstances, discCells, saveData.IsAdventureUnlocked);
+            if (saveData.AdventureNodes != null && saveData.AdventureNodes.Count > 0)
+            {
+                var loadedNodes = new List<AdventureNodeInstance>();
+                foreach (var sn in saveData.AdventureNodes)
+                {
+                    loadedNodes.Add(new AdventureNodeInstance(sn.NodeInstanceId, sn.NodeDefId, new Vector2Int(sn.X, sn.Y))
+                    {
+                        State = (NodeGatherState)sn.State,
+                        CurrentQuantity = sn.CurrentQuantity,
+                        MaxQuantity = sn.MaxQuantity,
+                        GatheringStartUtcTicks = sn.GatheringStartUtcTicks,
+                        RespawnStartUtcTicks = sn.RespawnStartUtcTicks,
+                        IsCleared = sn.IsCleared
+                    });
+                }
+                AdventureManager.LoadNodes(loadedNodes);
+            }
+            if (saveData.DiscoveredSpecialLocations != null)
+            {
+                AdventureManager.LoadDiscoveredLocations(saveData.DiscoveredSpecialLocations);
+            }
+
+            // Restore Social Manager (v10)
+            SocialManager = new SocialManager(PlatformServices, saveData.LocalSocialProfile);
+            SocialManager.LoadClaimedGifts(saveData.ClaimedGiftIds);
+            SocialManager.LoadAppreciatedPlayers(saveData.AppreciatedPlayerIds);
+
+            // Restore Market Manager (v11)
+            MarketManager = new MarketManager(EconomyManager, InventoryManager, PlayerProfile, TimeService, saveData.MarketListings, saveData.MarketHistory);
+
+            // Restore Quest Manager (v12)
+            QuestManager = new QuestManager(PlayerProfile, EconomyManager, InventoryManager, TimeService, saveData.ActiveQuests, saveData.ClaimedQuestIds, saveData.LastDailyResetUtcTicks);
 
             if (saveData.UnlockedZoneIds != null && saveData.UnlockedZoneIds.Count > 0)
             {
