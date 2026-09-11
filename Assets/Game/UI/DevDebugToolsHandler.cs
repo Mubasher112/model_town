@@ -31,6 +31,7 @@ namespace Game.UI
         private AdventureManager _adventureManager;
         private SocialManager _socialManager;
         private ISocialService _socialService;
+        private MarketManager _marketManager;
         private LocalSaveSystem _saveSystem;
 
         private bool _showDevMenu = false;
@@ -51,7 +52,8 @@ namespace Game.UI
             BuildingAccessibilityService accessibilityService = null,
             AdventureManager adventureManager = null,
             SocialManager socialManager = null,
-            ISocialService socialService = null)
+            ISocialService socialService = null,
+            MarketManager marketManager = null)
         {
             _grid = grid;
             _placementManager = placementManager;
@@ -69,7 +71,12 @@ namespace Game.UI
             _adventureManager = adventureManager;
             _socialManager = socialManager;
             _socialService = socialService;
+            _marketManager = marketManager;
         }
+
+        public void DevRestockAllMarket() => _marketManager?.DevRestockAll();
+        public void DevEmptyMarketStock() => _marketManager?.DevEmptyStock();
+        public void DevClearMarketHistory() => _marketManager?.DevClearHistory();
 
         public void DevSimulateSocialOffline() => _socialService?.SetOnline(false);
         public void DevSimulateSocialOnline() => _socialService?.SetOnline(true);

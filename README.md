@@ -21,8 +21,8 @@ Assets/Game/
 ├── Buildings/   # BuildingInstance, BuildingManager, BuildingStates, BuildingAccessibilityService
 ├── Camera/      # Mobile camera controller (Pan, Pinch-to-zoom, bounds switching)
 ├── Core/        # GameManager and Bootstrap initialization
-├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData, SocialData)
-├── Economy/     # EconomyManager for centralized coin/gem/XP transactions
+├── Data/        # Data definitions (Buildings, Crops, Recipes, Orders, Residents, Items, LandExpansions, AdventureData, ToolData, SocialData, MarketData)
+├── Economy/     # EconomyManager, MarketManager for centralized coin/gem/XP & market transactions
 ├── Farming/     # FarmManager, FieldInstance, CropGrowthSystem, FieldStates
 ├── Input/       # MobileInputManager supporting Tap, Drag, Pinch, Long Press
 ├── Inventory/   # Reusable InventoryManager with type and capacity limits
@@ -31,11 +31,11 @@ Assets/Game/
 ├── Player/      # PlayerProfile (Level, XP, Coins, Gems)
 ├── Production/  # ProductionManager, ProductionJob, ProductionBuildingInstance, ProductionStates
 ├── Residents/   # PopulationManager, HappinessManager, ResidentInstance, HappinessModifier, PopulationStats
-├── Save/        # LocalSaveSystem (Versioned JSON save v10, corruption recovery)
+├── Save/        # LocalSaveSystem (Versioned JSON save v11, corruption recovery)
 ├── Services/    # EnergyManager, ToolService, ExplorationService, MockSocialService, ISocialService, ILeaderboardService
 ├── Social/      # SocialManager (TownMode transitions, Read-Only Visit Mode, Appreciations, Gifts)
 ├── Tests/       # Automated NUnit test suite & Assembly Definition
-├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, SocialUIController, DevDebugToolsHandler
+├── UI/          # Mobile UI components, BuildMenuUIController, BuildingInfoUIController, FarmingUIController, ProductionUIController, OrdersUIController, TownOverviewUIController, LandExpansionUIController, AdventureUIController, SocialUIController, MarketUIController, DevDebugToolsHandler
 └── World/       # WorldGrid, PlacementValidator, ObjectPlacementManager, RoadManager, LandExpansionManager, WorldRenderer, ResidentWorldRenderer
 ```
 
@@ -44,56 +44,58 @@ Assets/Game/
 ## 3. Core Gameplay Loop Integration
 
 ```
-Explore & Mine → Process Resources → Build Town & Expand → Connect Socially & Visit Friends
+Farm & Mine → Produce Goods → Trade at Town Market → Earn Coins → Expand Town & Connect Socially
 ```
 
-1. **Adventure & Mining**: Unlock "Ancient Valley", mine Stone, Wood, Clay, Ore, Crystals using tools and ⚡ energy.
-2. **Farming & Production**: Process raw resources into manufactured products (Flour, Bread, Bricks).
-3. **Construction & Expansion**: Expand land, build housing, community facilities, and workshops.
-4. **Social & Friends**: Search players, send/accept friend requests, send daily gifts, appreciate towns, and visit friend towns in read-only snapshot mode without editing their world.
+1. **Farming & Adventure**: Harvest Wheat, Corn, Carrots, Sugarcane, Tomatoes, or gather Wood, Stone, Clay, Ore, Crystals.
+2. **Production**: Process raw goods into manufactured products (Flour, Bread, Animal Feed, Sugar, Milk, Bricks).
+3. **Town Market & Economy**: Buy missing resources or sell surplus products at the Town Market.
+4. **Orders & Delivery**: Fulfill customer orders via the Town Market delivery location.
+5. **Expansion & Social**: Expand town land, build housing/facilities, and interact with friends.
 
 ---
 
-## 4. Social & Friends Architecture
+## 4. Market & Trading Economy Architecture
 
-### Service Interfaces & Offline Resiliency
-- **`ISocialService`**: Asynchronous interface for `GetMyProfile`, `UpdateProfile`, `SearchPlayers`, `GetFriendsList`, `SendFriendRequest`, `AcceptFriendRequest`, `RejectFriendRequest`, `RemoveFriend`, `VisitTown`, `AppreciateTown`, `SendGift`, `BlockPlayer`, `ReportPlayer`.
-- **`MockSocialService`**: In-memory local social provider for offline testing and development with pre-configured mock player towns (`Sunny Valley`, `Green Farm`, `Happy Town`, `River Bend`).
-- **Offline Behavior**: When `ISocialService.IsOnline == false`, social requests fail gracefully with user-friendly messages while local single-player town gameplay, farming, and adventure remain 100% functional.
+### Town Market Building Integration
+- **Town Market Building**: Placeable/constructible community building (`town_market`) that acts as the central interface for buying resources, selling products, viewing market stock, and tracking transaction history.
 
-### Read-Only Town Visit Mode
-- **Snapshot Representation**: `TownSnapshot` encapsulates building positions, road grids, population, and happiness stats without exposing private tokens or auth credentials.
-- **`GameTownMode.FriendVisit`**: Switching town mode disables building placement, road editing, crop harvesting, and inventory changes, displaying a "VISITING [Player Name] (Read-Only)" UI banner with a single-tap "Return to My Town" option.
+### Buy & Sell System Rules
+- **Buy System**: Validates player level unlock, available market stock, inventory storage capacity, and coin balance before atomically deducting coins and adding items.
+- **Sell System**: Validates player inventory ownership and level requirements before atomically removing items and adding coins.
+- **Price Spread Safety**: Buy prices are set higher than sell prices (e.g., Buy Wheat: 10 Coins, Sell Wheat: 6 Coins) to prevent infinite currency creation loops.
+- **Double-Tap Protection**: UI actions flag active transactions to prevent rapid double-tapping from executing duplicate purchases or sales.
+
+### Timestamp-Based Offline Restocking
+- **Stock Limits**: Items have configurable max stocks (e.g., Wheat max 100, Bread max 40).
+- **UTC Offline Calculation**: Market stock regenerates over real-world time (e.g., +20 Wheat every 30 minutes) using UTC timestamps. Stock recalculates smoothly when the player returns offline.
 
 ---
 
-## 5. Save System Schema (Version 10)
+## 5. Save System Schema (Version 11)
 
-The save system supports automatic migration up to `SaveDataVersion = 10` (`save_v10.json`):
+The save system supports automatic migration up to `SaveDataVersion = 11` (`save_v11.json`):
 - Player Profile & Unlocked Zone IDs
 - World Objects, Fields, Buildings, Roads
 - Production Building Queues & Order History
 - Resident Instances & Housing Assignments
 - Adventure Grid, Energy State, Tool Durabilities
-- **Local Social Profile (Display Name, Avatar ID)**
-- **Cached Friend Relationships**
-- **Blocked Player IDs**
-- **Claimed Gift IDs & Appreciated Town IDs**
+- Local Social Profile, Cached Friends, Blocked Players, Appreciated Towns
+- **Market Stock Listings & Last Restock UTC Timestamps**
+- **Market Transaction History Log**
 
 ---
 
 ## 6. Development & Debug Tools
-`DevDebugToolsHandler` provides social debug shortcuts:
-- **Simulate Offline / Online**: Toggles network availability for social services.
-- **Send Mock Friend Request**: Sends a friend request to `p_sunny`.
-- **Accept All Requests**: Auto-accepts incoming friend requests.
-- **Visit Mock Town**: Loads Sunny Valley in Read-Only Visit Mode.
-- **Return From Visit**: Returns to player's home town.
+`DevDebugToolsHandler` provides market debug shortcuts:
+- **Restock All Market**: Instantly refills all market items to max stock.
+- **Empty Market Stock**: Clears all market stock for testing stock depletion.
+- **Clear Market History**: Resets transaction history logs.
 
 ---
 
 ## 7. Running Automated Tests
-Run all 58 automated unit tests directly via .NET CLI:
+Run all 65 automated unit tests directly via .NET CLI:
 ```bash
 dotnet test ModelTown.Tests.csproj
 ```

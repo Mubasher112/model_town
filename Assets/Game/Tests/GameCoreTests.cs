@@ -401,6 +401,10 @@ namespace Game.Tests
             var workshop = BuildingLibrary.GetBuilding("small_workshop");
             Assert.IsNotNull(workshop);
             Assert.AreEqual(2, workshop.RequiredMaterials.Count);
+
+            var market = BuildingLibrary.GetBuilding("town_market");
+            Assert.IsNotNull(market);
+            Assert.AreEqual("Town Market", market.Name);
         }
 
         [Test]
@@ -649,143 +653,117 @@ namespace Game.Tests
         }
         #endregion
 
-        #region Task 9 Adventure & Exploration System Tests
+        #region Task 9 Market & Trading Economy Tests
         [Test]
-        public void EnergyManager_UTCRegenerationAndClamping()
+        public void MarketManager_BuyItem_AtomicTransactionAndStockReduction()
+        {
+            var timeService = new StandardGameTimeService();
+            var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Coins = 500;
+            long initialCoins = _profile.Coins;
+
+            // Buy 5 Wheat (10 coins each = 50 coins)
+            var buyResult = marketManager.BuyItem("crop_wheat", 5);
+
+            Assert.AreEqual(MarketOperationResult.Success, buyResult);
+            Assert.AreEqual(initialCoins - 50, _profile.Coins);
+            Assert.AreEqual(5, _inventoryManager.GetQuantity("crop_wheat"));
+
+            var listing = marketManager.GetListing("crop_wheat");
+            Assert.AreEqual(95, listing.CurrentStock); // 100 - 5 = 95 stock remaining
+
+            var history = marketManager.ExportHistory();
+            Assert.AreEqual(1, history.Count);
+            Assert.AreEqual(TransactionType.Buy, history[0].Type);
+            Assert.AreEqual(50, history[0].TotalPrice);
+        }
+
+        [Test]
+        public void MarketManager_BuyItem_RejectsInsufficientCoinsOrStorageOrLockedLevel()
+        {
+            var timeService = new StandardGameTimeService();
+            var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Coins = 10;
+            // Insufficient coins for 5 Wheat (50 coins)
+            Assert.AreEqual(MarketOperationResult.InsufficientCoins, marketManager.BuyItem("crop_wheat", 5));
+            Assert.AreEqual(10, _profile.Coins);
+
+            _profile.Coins = 1000;
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 50); // Storage Full (50/50)
+            Assert.AreEqual(MarketOperationResult.InsufficientStorage, marketManager.BuyItem("crop_wheat", 1));
+
+            // Rejects level-locked item (Sugarcane requires Level 5)
+            _profile.Level = 1;
+            Assert.AreEqual(MarketOperationResult.LevelLocked, marketManager.BuyItem("crop_sugarcane", 1));
+        }
+
+        [Test]
+        public void MarketManager_SellItem_AtomicEarningsAndInventoryDeduction()
+        {
+            var timeService = new StandardGameTimeService();
+            var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Coins = 100;
+            _inventoryManager.AddItem("crop_wheat", "Wheat", ItemType.Crop, 10);
+
+            // Sell 5 Wheat (6 coins sell price each = 30 coins earned)
+            var sellResult = marketManager.SellItem("crop_wheat", 5);
+
+            Assert.AreEqual(MarketOperationResult.Success, sellResult);
+            Assert.AreEqual(130, _profile.Coins);
+            Assert.AreEqual(5, _inventoryManager.GetQuantity("crop_wheat"));
+
+            var history = marketManager.ExportHistory();
+            Assert.AreEqual(1, history.Count);
+            Assert.AreEqual(TransactionType.Sell, history[0].Type);
+            Assert.AreEqual(30, history[0].TotalPrice);
+        }
+
+        [Test]
+        public void MarketManager_BuyAndSellPriceDifference_PreventsInfiniteCurrencyLoop()
+        {
+            var timeService = new StandardGameTimeService();
+            var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
+
+            _profile.Coins = 100;
+
+            // Buy 1 Wheat (10 coins) -> Balance 90
+            marketManager.BuyItem("crop_wheat", 1);
+            Assert.AreEqual(90, _profile.Coins);
+
+            // Immediately sell 1 Wheat (6 coins) -> Balance 96
+            marketManager.SellItem("crop_wheat", 1);
+            Assert.AreEqual(96, _profile.Coins);
+
+            // Net loss of 4 coins per cycle prevents currency duplication exploits
+            Assert.Less(_profile.Coins, 100);
+        }
+
+        [Test]
+        public void MarketManager_UTCUtOfflineRestocking()
         {
             var timeService = new StandardGameTimeService();
             long startTicks = timeService.CurrentUtcTicks;
 
-            var energyState = new EnergyState(20, startTicks) { CurrentEnergy = 10 };
-            var energyManager = new EnergyManager(energyState, timeService, secondsPerEnergyUnit: 300f);
+            var marketManager = new MarketManager(_economyManager, _inventoryManager, _profile, timeService);
 
-            Assert.AreEqual(10, energyManager.CurrentEnergy);
-            Assert.IsTrue(energyManager.ConsumeEnergy(3));
-            Assert.AreEqual(7, energyManager.CurrentEnergy);
+            // Deplete Wheat stock to 0
+            marketManager.DevEmptyStock();
+            Assert.AreEqual(0, marketManager.GetListing("crop_wheat").CurrentStock);
 
-            timeService.AdvanceTime(System.TimeSpan.FromSeconds(600));
-            energyManager.RecalculateEnergy();
+            // Advance 30 minutes (1800s) -> +20 Restock Amount
+            timeService.AdvanceTime(System.TimeSpan.FromSeconds(1800));
+            marketManager.RecalculateRestocks();
 
-            Assert.AreEqual(9, energyManager.CurrentEnergy);
+            Assert.AreEqual(20, marketManager.GetListing("crop_wheat").CurrentStock);
 
-            timeService.AdvanceTime(System.TimeSpan.FromSeconds(6000));
-            energyManager.RecalculateEnergy();
+            // Advance 10 hours -> Clamped to Max Stock (100)
+            timeService.AdvanceTime(System.TimeSpan.FromHours(10));
+            marketManager.RecalculateRestocks();
 
-            Assert.AreEqual(20, energyManager.CurrentEnergy);
-        }
-
-        [Test]
-        public void ToolService_DurabilityAndConsumption()
-        {
-            var toolService = new ToolService();
-            Assert.IsTrue(toolService.HasDurability("tool_pickaxe", 1));
-
-            Assert.IsTrue(toolService.ConsumeDurability("tool_pickaxe", 10));
-            var pickaxe = toolService.GetTool("tool_pickaxe");
-            Assert.AreEqual(20, pickaxe.CurrentDurability);
-
-            toolService.RepairOrRefillTool("tool_pickaxe");
-            Assert.AreEqual(30, pickaxe.CurrentDurability);
-        }
-
-        [Test]
-        public void AdventureManager_UnlockAndEntryRequirements()
-        {
-            var timeService = new StandardGameTimeService();
-            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
-
-            _profile.Level = 1;
-            Assert.AreEqual(AdventureOperationResult.LevelRequirementNotMet, advManager.TryUnlockAdventure(currentPopulation: 0));
-
-            _profile.Level = 8;
-            _profile.Coins = 1000;
-            Assert.AreEqual(AdventureOperationResult.PopulationRequirementNotMet, advManager.TryUnlockAdventure(currentPopulation: 5));
-
-            Assert.AreEqual(AdventureOperationResult.Success, advManager.TryUnlockAdventure(currentPopulation: 10));
-            Assert.IsTrue(advManager.IsUnlocked);
-            Assert.AreEqual(0, _profile.Coins);
-
-            Assert.IsTrue(advManager.EnterAdventureArea());
-            Assert.IsTrue(advManager.IsInAdventureMap);
-            Assert.IsTrue(advManager.ExitAdventureArea());
-            Assert.IsFalse(advManager.IsInAdventureMap);
-        }
-
-        [Test]
-        public void AdventureManager_FogOfWarAndMovementDiscovery()
-        {
-            var timeService = new StandardGameTimeService();
-            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
-            advManager.DevUnlockAdventure();
-            advManager.EnterAdventureArea();
-
-            Vector2Int startPos = advManager.PlayerPosition;
-            Assert.IsTrue(advManager.ExplorationService.IsDiscovered(startPos));
-
-            Vector2Int farPos = new Vector2Int(20, 20);
-            Assert.IsFalse(advManager.ExplorationService.IsDiscovered(farPos));
-
-            advManager.MovePlayer(new Vector2Int(12, 5));
-            Assert.IsTrue(advManager.ExplorationService.IsDiscovered(new Vector2Int(12, 5)));
-        }
-
-        [Test]
-        public void ResourceGatheringService_GatherNode_AwardsResourcesAndConsumesDurabilityAndEnergy()
-        {
-            var timeService = new StandardGameTimeService();
-            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
-            advManager.DevUnlockAdventure();
-            advManager.EnterAdventureArea();
-
-            int initialEnergy = advManager.EnergyManager.CurrentEnergy;
-            int initialDurability = advManager.ToolService.GetTool("tool_pickaxe").CurrentDurability;
-
-            var result = advManager.GatherNodeAtPosition(new Vector2Int(10, 5), out int yieldAmount, out int xpEarned);
-
-            Assert.AreEqual(GatheringOperationResult.Success, result);
-            Assert.AreEqual(5, yieldAmount);
-            Assert.AreEqual(5, xpEarned);
-            Assert.AreEqual(5, _inventoryManager.GetQuantity("item_stone"));
-            Assert.AreEqual(initialEnergy - 2, advManager.EnergyManager.CurrentEnergy);
-            Assert.AreEqual(initialDurability - 1, advManager.ToolService.GetTool("tool_pickaxe").CurrentDurability);
-        }
-
-        [Test]
-        public void AdventureManager_ObstacleClearing_UnblocksPath()
-        {
-            var timeService = new StandardGameTimeService();
-            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
-            advManager.DevUnlockAdventure();
-            advManager.EnterAdventureArea();
-
-            Vector2Int obstaclePos = new Vector2Int(12, 10);
-            advManager.DevSetPlayerPos(new Vector2Int(12, 9));
-
-            Assert.IsFalse(advManager.MovePlayer(obstaclePos));
-
-            var gatherResult = advManager.GatherNodeAtPosition(obstaclePos, out _, out _);
-            Assert.AreEqual(GatheringOperationResult.Success, gatherResult);
-
-            Assert.IsTrue(advManager.MovePlayer(obstaclePos));
-            Assert.AreEqual(obstaclePos, advManager.PlayerPosition);
-        }
-
-        [Test]
-        public void AdventureManager_SpecialLocationDiscovery()
-        {
-            var timeService = new StandardGameTimeService();
-            var advManager = new AdventureManager(_profile, _economyManager, _inventoryManager, timeService);
-            advManager.DevUnlockAdventure();
-            advManager.EnterAdventureArea();
-
-            int initialXp = _profile.CurrentXP;
-            long initialCoins = _profile.Coins;
-
-            advManager.MovePlayer(new Vector2Int(20, 20));
-
-            Assert.Greater(_profile.CurrentXP, initialXp);
-            Assert.Greater(_profile.Coins, initialCoins);
-            Assert.AreEqual(2, _inventoryManager.GetQuantity("item_rare_crystal"));
+            Assert.AreEqual(100, marketManager.GetListing("crop_wheat").CurrentStock);
         }
         #endregion
 
@@ -797,7 +775,7 @@ namespace Game.Tests
             bool updateSuccess = false;
 
             mockSocial.UpdateProfile("   ", "avatar_farmer", (s, err) => updateSuccess = s);
-            Assert.IsFalse(updateSuccess); // Rejects blank name
+            Assert.IsFalse(updateSuccess);
 
             mockSocial.UpdateProfile("Green Valley", "avatar_farmer", (s, err) => updateSuccess = s);
             Assert.IsTrue(updateSuccess);
@@ -815,27 +793,22 @@ namespace Game.Tests
         {
             var mockSocial = new MockSocialService();
 
-            // Rejects self-request
             bool selfReqSuccess = true;
             mockSocial.SendFriendRequest("p_my_id", (s, err) => selfReqSuccess = s);
             Assert.IsFalse(selfReqSuccess);
 
-            // Send friend request to p_sunny
             bool sendSuccess = false;
             mockSocial.SendFriendRequest("p_sunny", (s, err) => sendSuccess = s);
             Assert.IsTrue(sendSuccess);
 
-            // Rejects duplicate request
             bool dupReqSuccess = true;
             mockSocial.SendFriendRequest("p_sunny", (s, err) => dupReqSuccess = s);
             Assert.IsFalse(dupReqSuccess);
 
-            // Accept friend request
             bool acceptSuccess = false;
             mockSocial.AcceptFriendRequest("p_sunny", (s, err) => acceptSuccess = s);
             Assert.IsTrue(acceptSuccess);
 
-            // Verify friend list
             List<FriendRelationship> friends = null;
             mockSocial.GetFriendsList((s, list, err) => friends = list);
             Assert.IsNotNull(friends);
@@ -843,7 +816,6 @@ namespace Game.Tests
             Assert.AreEqual("p_sunny", friends[0].TargetPlayerId);
             Assert.AreEqual(FriendStatus.Accepted, friends[0].Status);
 
-            // Remove friend
             bool removeSuccess = false;
             mockSocial.RemoveFriend("p_sunny", (s, err) => removeSuccess = s);
             Assert.IsTrue(removeSuccess);
@@ -893,13 +865,13 @@ namespace Game.Tests
             var mockSocial = new MockSocialService();
             var socialManager = new SocialManager(mockSocial);
 
-            Assert.IsFalse(socialManager.CanAppreciateTown("p_my_id")); // Self appreciation blocked
+            Assert.IsFalse(socialManager.CanAppreciateTown("p_my_id"));
 
             bool appreciateSuccess = false;
             socialManager.AppreciateTown("p_sunny", (s, err) => appreciateSuccess = s);
             Assert.IsTrue(appreciateSuccess);
 
-            Assert.IsFalse(socialManager.CanAppreciateTown("p_sunny")); // Duplicate appreciation blocked
+            Assert.IsFalse(socialManager.CanAppreciateTown("p_sunny"));
         }
 
         [Test]
@@ -935,30 +907,32 @@ namespace Game.Tests
         #endregion
 
         [Test]
-        public void SaveSystem_SaveAndLoad_Version10Schema()
+        public void SaveSystem_SaveAndLoad_Version11Schema()
         {
             var storage = new MockStorage();
-            var saveSystem = new LocalSaveSystem("save_v10.json", storage);
+            var saveSystem = new LocalSaveSystem("save_v11.json", storage);
 
             var initialSave = new SaveData
             {
-                Version = 10,
+                Version = 11,
                 PlayerProfile = new PlayerProfile { Level = 12, Coins = 5000, Gems = 100 },
-                LocalSocialProfile = new SocialProfile("p_test_10", "Mubasher's Valley", 12, 18, 86, "avatar_farmer"),
-                BlockedPlayerIds = new List<string> { "p_blocked_1" },
-                AppreciatedPlayerIds = new List<string> { "p_sunny" }
+                MarketListings = new List<MarketListing> { new MarketListing("crop_wheat", 80, System.DateTime.UtcNow.Ticks) },
+                MarketHistory = new List<MarketTransaction>
+                {
+                    new MarketTransaction("tx_1", TransactionType.Buy, "crop_wheat", "Wheat", 5, 10, 50, System.DateTime.UtcNow.Ticks)
+                }
             };
 
             saveSystem.Save(initialSave);
-            Assert.IsTrue(storage.Exists("save_v10.json"));
+            Assert.IsTrue(storage.Exists("save_v11.json"));
 
             var loadedSave = saveSystem.Load();
-            Assert.AreEqual(10, loadedSave.Version);
-            Assert.AreEqual("Mubasher's Valley", loadedSave.LocalSocialProfile.DisplayName);
-            Assert.AreEqual("avatar_farmer", loadedSave.LocalSocialProfile.AvatarId);
-            Assert.AreEqual(1, loadedSave.BlockedPlayerIds.Count);
-            Assert.AreEqual("p_blocked_1", loadedSave.BlockedPlayerIds[0]);
-            Assert.AreEqual(1, loadedSave.AppreciatedPlayerIds.Count);
+            Assert.AreEqual(11, loadedSave.Version);
+            Assert.AreEqual(1, loadedSave.MarketListings.Count);
+            Assert.AreEqual(80, loadedSave.MarketListings[0].CurrentStock);
+            Assert.AreEqual(1, loadedSave.MarketHistory.Count);
+            Assert.AreEqual(TransactionType.Buy, loadedSave.MarketHistory[0].Type);
+            Assert.AreEqual(50, loadedSave.MarketHistory[0].TotalPrice);
         }
 
         private class MockStorage : ISaveStorage

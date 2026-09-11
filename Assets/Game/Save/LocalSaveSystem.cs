@@ -159,7 +159,7 @@ namespace Game.Save
     [Serializable]
     public class SaveData
     {
-        public int Version = 10;
+        public int Version = 11;
         public long Timestamp;
         public PlayerProfile PlayerProfile = new PlayerProfile();
         public List<InventoryItem> InventoryItems = new List<InventoryItem>();
@@ -191,6 +191,10 @@ namespace Game.Save
         public List<string> BlockedPlayerIds = new List<string>();
         public List<string> ClaimedGiftIds = new List<string>();
         public List<string> AppreciatedPlayerIds = new List<string>();
+
+        // Market Persistence Fields (v11)
+        public List<MarketListing> MarketListings = new List<MarketListing>();
+        public List<MarketTransaction> MarketHistory = new List<MarketTransaction>();
     }
 
     public interface ISaveStorage
@@ -203,7 +207,7 @@ namespace Game.Save
 
     public class LocalSaveSystem
     {
-        public const int CurrentSaveVersion = 10;
+        public const int CurrentSaveVersion = 11;
         private readonly string _saveFilePath;
         private readonly ISaveStorage _storage;
 
@@ -306,7 +310,9 @@ namespace Game.Save
                 CachedFriends = new List<FriendRelationship>(),
                 BlockedPlayerIds = new List<string>(),
                 ClaimedGiftIds = new List<string>(),
-                AppreciatedPlayerIds = new List<string>()
+                AppreciatedPlayerIds = new List<string>(),
+                MarketListings = new List<MarketListing>(),
+                MarketHistory = new List<MarketTransaction>()
             };
             Save(data);
             return data;
@@ -380,6 +386,12 @@ namespace Game.Save
                 if (data.BlockedPlayerIds == null) data.BlockedPlayerIds = new List<string>();
                 if (data.ClaimedGiftIds == null) data.ClaimedGiftIds = new List<string>();
                 if (data.AppreciatedPlayerIds == null) data.AppreciatedPlayerIds = new List<string>();
+            }
+
+            if (data.Version < 11)
+            {
+                if (data.MarketListings == null) data.MarketListings = new List<MarketListing>();
+                if (data.MarketHistory == null) data.MarketHistory = new List<MarketTransaction>();
             }
 
             data.Version = CurrentSaveVersion;
